@@ -1,0 +1,22 @@
+{
+  "bind": "0.0.0.0:3000",
+  "base_url": "http://localhost:3000/",
+  "upstreams": [
+    {
+      "name": "postapic",
+      "target_url": "https://wc.rahim.li/",
+      "claims": ["core:id", "core:username", "postapic:id"],
+
+      "require_authentication": true,
+      "require_claims": ["postapic:id"]
+    },
+    {
+      "name": "blocks",
+      "target_url": "https://blocks.themisir.com/",
+      "claims": ["core:id", "core:username", "blocks:role"],
+
+      "require_authentication": false,
+      "require_claims": []
+    }
+  ]
+}
