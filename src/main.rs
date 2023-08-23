@@ -1,3 +1,4 @@
+use anyhow::anyhow;
 use app::{AppConfig, AppState};
 use axum::Router;
 use tokio::signal;
@@ -7,7 +8,12 @@ mod store;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    env_logger::init();
+
     let app_config = AppConfig::from_file("./config.json").await?;
+
+    store::migrate(&app_config).await?;
+
     let app_state = AppState::from_config(app_config.clone()).await?;
 
     let routes = Router::new()

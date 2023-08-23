@@ -4,9 +4,12 @@ use anyhow::anyhow;
 use chrono::Duration;
 use chrono::prelude::*;
 use futures::{TryStreamExt};
+use log::info;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use sqlx::SqlitePool;
+use url::Url;
+use crate::app::AppConfig;
 
 pub enum UserRole {
     Default,
@@ -69,15 +72,55 @@ pub struct UserClaim {
     pub value: String,
 }
 
+mod embedded {
+    use refinery::embed_migrations;
+    embed_migrations!("./src/migrations");
+}
+
+pub async fn migrate(config: &AppConfig) -> anyhow::Result<()> {
+    use refinery::config::*;
+    use url::Url;
+
+    let url = Url::parse(config.users_db.as_str())
+        .map_err(|_| anyhow!("unable to parse database URL: {}", config.users_db.clone()))?;
+
+    let db_path = url.as_str()[url.scheme().len()..]
+        .trim_start_matches(':')
+        .trim_start_matches("//")
+        .to_string();
+
+    std::fs::File::create(db_path.as_str())
+        .map_err(|err| anyhow!("unable to create db file: {}", err))?;
+
+    let mut conf = Config::new(ConfigDbType::Sqlite)
+        .set_db_path(db_path.as_str());
+
+    let report = embedded::migrations::runner().run(&mut conf)?;
+    for migration in report.applied_migrations() {
+        info!("Applied migration {}.", migration.name())
+    }
+
+    Ok(())
+}
+
+#[derive(Clone)]
 pub struct UserStore {
     pool: SqlitePool,
 }
 
 impl UserStore {
+    pub fn new(pool: SqlitePool) -> Self {
+        Self { pool }
+    }
+
     fn normalize_username(s: &str) -> (&str, String) {
         let username = s.trim();
         let normalized_username = username.to_uppercase();
         (username, normalized_username)
+    }
+
+    fn get_pool(&self) -> &SqlitePool {
+        &self.pool
     }
 
     pub async fn find_user_by_username(&self, username: &str) -> anyhow::Result<Option<User>> {
@@ -93,7 +136,7 @@ impl UserStore {
 
         let row = sqlx::query_as::<_, Row>(include_str!("sql/find_user_by_username.sql"))
             .bind(normalized_username)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.get_pool())
             .await?;
 
         Ok(row.map(|row| User {
@@ -113,7 +156,7 @@ impl UserStore {
 
         let mut stream = sqlx::query_as::<_, Row>(include_str!("sql/get_user_claims.sql"))
             .bind(user_id)
-            .fetch(&self.pool);
+            .fetch(self.get_pool());
 
         let mut claims = Vec::new();
 
@@ -140,7 +183,7 @@ impl UserStore {
             .bind(username)
             .bind(normalized_username)
             .bind(password_hash)
-            .fetch_one(&self.pool)
+            .fetch_one(self.get_pool())
             .await?;
 
         Ok(User {
@@ -164,7 +207,7 @@ impl UserStore {
 
         let row = sqlx::query_as::<_, Row>(include_str!("sql/find_user_by_session.sql"))
             .bind(session_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(self.get_pool())
             .await?;
 
         match row {
@@ -201,7 +244,7 @@ impl UserStore {
             .bind(user_id)
             .bind(issuer)
             .bind(expires_at)
-            .execute(&self.pool)
+            .execute(self.get_pool())
             .await?;
 
         if result.rows_affected() == 1 {

@@ -1,16 +1,26 @@
 use std::{net::SocketAddr, path::Path};
 
 use serde::{Deserialize, Serialize};
+use sqlx::sqlite::SqlitePoolOptions;
+use crate::store::UserStore;
 
 #[derive(Clone)]
 pub struct AppState {
     pub config: Box<AppConfig>,
+    pub store: UserStore,
 }
 
 impl AppState {
     pub async fn from_config(config: AppConfig) -> anyhow::Result<Self> {
-        Ok(AppState{
-            config: Box::new(config)
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect(config.users_db.as_str()).await?;
+
+        let store = UserStore::new(pool);
+
+        Ok(AppState {
+            config: Box::new(config),
+            store,
         })
     }
 }
@@ -19,6 +29,7 @@ impl AppState {
 pub struct AppConfig {
     pub bind: SocketAddr,
     pub base_url: String,
+    pub users_db: String,
     pub upstreams: Vec<UpstreamConfig>,
 }
 

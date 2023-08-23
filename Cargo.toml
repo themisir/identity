@@ -25,4 +25,10 @@ anyhow = "1"
 argon2 = "0.5"
 
 sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "chrono"] }
+refinery = { version = "0.8", features = ["rusqlite"] }
 chrono = { version = "0.4", features = ["serde"] }
+
+url = "2.4.0"
+
+log = "0.4"
+env_logger = "0.10"
