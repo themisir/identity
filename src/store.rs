@@ -8,7 +8,6 @@ use log::info;
 use rand::distributions::Alphanumeric;
 use rand::Rng;
 use sqlx::SqlitePool;
-use url::Url;
 use crate::app::AppConfig;
 
 pub enum UserRole {
@@ -128,7 +127,7 @@ impl UserStore {
 
         #[derive(sqlx::FromRow)]
         struct Row {
-            user_id: i32,
+            id: i32,
             username: String,
             password_hash: String,
             role_name: String,
@@ -140,7 +139,7 @@ impl UserStore {
             .await?;
 
         Ok(row.map(|row| User {
-            id: row.user_id,
+            id: row.id,
             username: row.username,
             password_hash: row.password_hash,
             role: UserRole::from_str(row.role_name.as_str()).unwrap_or(UserRole::Default),
@@ -173,7 +172,7 @@ impl UserStore {
 
         #[derive(sqlx::FromRow)]
         struct Row {
-            user_id: i32,
+            id: i32,
             username: String,
             password_hash: String,
             role_name: String,
@@ -187,7 +186,7 @@ impl UserStore {
             .await?;
 
         Ok(User {
-            id: row.user_id,
+            id: row.id,
             username: row.username,
             password_hash: row.password_hash,
             role: UserRole::from_str(row.role_name.as_str()).unwrap_or(UserRole::Default),

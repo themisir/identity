@@ -1,4 +1,3 @@
-use anyhow::anyhow;
 use app::{AppConfig, AppState};
 use axum::Router;
 use tokio::signal;
