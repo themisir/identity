@@ -5,7 +5,10 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }
+
 axum = { version = "0.6" }
+axum-macros = "0.3.8"
+cookie = { version = "0.17", features = ["percent-encoding", "percent-encode"] }
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -32,3 +35,5 @@ url = "2.4.0"
 
 log = "0.4"
 env_logger = "0.10"
+
+clap = { version = "4.3.10", features = ["derive"] }

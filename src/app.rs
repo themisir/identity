@@ -1,12 +1,15 @@
-use std::{net::SocketAddr, path::Path};
+use std::{net::SocketAddr, path::Path, sync::Arc};
 
+use crate::store::UserStore;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePoolOptions;
-use crate::store::UserStore;
+use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Clone)]
-pub struct AppState {
-    pub config: Box<AppConfig>,
+pub struct AppState(Arc<RwLock<AppStateInner>>);
+
+pub struct AppStateInner {
+    pub config: AppConfig,
     pub store: UserStore,
 }
 
@@ -14,14 +17,22 @@ impl AppState {
     pub async fn from_config(config: AppConfig) -> anyhow::Result<Self> {
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(config.users_db.as_str()).await?;
+            .connect(config.users_db.as_str())
+            .await?;
 
         let store = UserStore::new(pool);
 
-        Ok(AppState {
-            config: Box::new(config),
-            store,
-        })
+        let state = AppStateInner { config, store };
+
+        Ok(AppState(Arc::new(RwLock::new(state))))
+    }
+
+    pub async fn read(&self) -> RwLockReadGuard<AppStateInner> {
+        self.0.read().await
+    }
+
+    pub async fn write(&self) -> RwLockWriteGuard<AppStateInner> {
+        self.0.write().await
     }
 }
 

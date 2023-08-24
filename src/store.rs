@@ -1,14 +1,10 @@
-use std::ops::Add;
-use std::str::FromStr;
-use anyhow::anyhow;
-use chrono::Duration;
-use chrono::prelude::*;
-use futures::{TryStreamExt};
-use log::info;
-use rand::distributions::Alphanumeric;
-use rand::Rng;
-use sqlx::SqlitePool;
 use crate::app::AppConfig;
+use anyhow::anyhow;
+use chrono::{prelude::*, Duration};
+use futures::TryStreamExt;
+use rand::{distributions::Alphanumeric, Rng};
+use sqlx::SqlitePool;
+use std::str::FromStr;
 
 pub enum UserRole {
     Default,
@@ -22,7 +18,7 @@ impl FromStr for UserRole {
         match s {
             "admin" => Ok(UserRole::Admin),
             "default" => Ok(UserRole::Default),
-            _ => Err(anyhow!("invalid role name: {}", s))
+            _ => Err(anyhow!("invalid role name: {}", s)),
         }
     }
 }
@@ -44,7 +40,9 @@ impl User {
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
 
-        argon2.hash_password(password, &salt).map(|password_hash| password_hash.to_string())
+        argon2
+            .hash_password(password, &salt)
+            .map(|password_hash| password_hash.to_string())
     }
 
     pub(crate) fn verify_hash(password_hash: &str, password: &[u8]) -> bool {
@@ -57,7 +55,7 @@ impl User {
             Ok(parsed_hash) => Argon2::default()
                 .verify_password(password, &parsed_hash)
                 .is_ok(),
-            Err(_) => false
+            Err(_) => false,
         }
     }
 
@@ -88,11 +86,11 @@ pub async fn migrate(config: &AppConfig) -> anyhow::Result<()> {
         .trim_start_matches("//")
         .to_string();
 
-    std::fs::File::create(db_path.as_str())
+    let f = std::fs::File::create(db_path.as_str())
         .map_err(|err| anyhow!("unable to create db file: {}", err))?;
+    drop(f);
 
-    let mut conf = Config::new(ConfigDbType::Sqlite)
-        .set_db_path(db_path.as_str());
+    let mut conf = Config::new(ConfigDbType::Sqlite).set_db_path(db_path.as_str());
 
     embedded::migrations::runner().run(&mut conf)?;
 
@@ -157,14 +155,18 @@ impl UserStore {
         let mut claims = Vec::new();
 
         while let Some(row) = stream.try_next().await? {
-            claims.push(UserClaim { name: row.claim_name, value: row.claim_value })
+            claims.push(UserClaim {
+                name: row.claim_name,
+                value: row.claim_value,
+            })
         }
 
         Ok(claims)
     }
 
     pub async fn create_user(&self, username: &str, password: &str) -> anyhow::Result<User> {
-        let password_hash = User::create_hash(password.as_bytes()).map_err(|err| anyhow!("failed to create hash: {}", err))?;
+        let password_hash = User::create_hash(password.as_bytes())
+            .map_err(|err| anyhow!("failed to create hash: {}", err))?;
         let (username, normalized_username) = Self::normalize_username(username);
 
         #[derive(sqlx::FromRow)]
@@ -190,7 +192,11 @@ impl UserStore {
         })
     }
 
-    pub async fn find_user_by_session(&self, session_id: &str, issuer: Option<&str>) -> anyhow::Result<Option<User>> {
+    pub async fn find_user_by_session(
+        &self,
+        session_id: &str,
+        issuer: Option<&str>,
+    ) -> anyhow::Result<Option<User>> {
         #[derive(sqlx::FromRow)]
         struct Row {
             issuer: Option<String>,
@@ -212,7 +218,7 @@ impl UserStore {
                 if match (issuer, &row.issuer) {
                     (None, _) => true,
                     (Some(i1), Some(i2)) => i2.eq(i1),
-                    _ => false
+                    _ => false,
                 } {
                     return Err(anyhow!("invalid issuer"));
                 }
@@ -227,8 +233,13 @@ impl UserStore {
         }
     }
 
-    pub async fn create_user_session(&self, user_id: i32, issuer: &str, ttl: Option<Duration>) -> anyhow::Result<String> {
-        let expires_at = ttl.map(|ttl| Utc::now().add(ttl));
+    pub async fn create_user_session(
+        &self,
+        user_id: i32,
+        issuer: &str,
+        ttl: Option<Duration>,
+    ) -> anyhow::Result<String> {
+        let expires_at = ttl.map(|ttl| Utc::now() + ttl);
         let session_id: String = rand::thread_rng()
             .sample_iter(&Alphanumeric)
             .take(7)

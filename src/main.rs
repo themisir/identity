@@ -1,9 +1,11 @@
 use app::{AppConfig, AppState};
 use axum::Router;
+use axum::routing::{get,post};
 use log::info;
 use tokio::signal;
 
 mod app;
+mod auth;
 mod store;
 
 #[tokio::main]
@@ -17,6 +19,9 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState::from_config(app_config.clone()).await?;
 
     let routes = Router::new()
+        .route("/login", get(auth::show_login))
+        .route("/login", post(auth::handle_login))
+        .route("/logout", post(auth::logout))
         .with_state(app_state);
 
     info!("Binding on {}", app_config.bind);
@@ -37,7 +42,7 @@ async fn shutdown_signal() {
     };
 
     #[cfg(unix)]
-        let terminate = async {
+    let terminate = async {
         signal::unix::signal(signal::unix::SignalKind::terminate())
             .expect("failed to install signal handler")
             .recv()
@@ -45,7 +50,7 @@ async fn shutdown_signal() {
     };
 
     #[cfg(not(unix))]
-        let terminate = std::future::pending::<()>();
+    let terminate = std::future::pending::<()>();
 
     tokio::select! {
         _ = ctrl_c => {},
