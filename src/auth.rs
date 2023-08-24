@@ -34,7 +34,7 @@ pub async fn logout(Query(redirect): Query<RedirectParams>) -> impl IntoResponse
 
     (
         AuthParams::clear_cookie(),
-        Redirect::temporary(redirect_to.as_str()),
+        Redirect::to(redirect_to.as_str()),
     )
 }
 
@@ -84,14 +84,16 @@ pub async fn handle_login(
 
             return Ok((
                 AuthParams::new(session_token).set_cookie(Some(Duration::days(30))),
-                Redirect::temporary(redirect_to.as_str()),
+                Redirect::to(redirect_to.as_str()),
             ));
         }
     }
 
     Ok((
         AuthParams::clear_cookie(),
-        redirect_with_params("/login?error=invalid_password&", move |builder| {
+        redirect_with_params("/login?", move |builder| {
+            builder.append_pair("error", "invalid_password");
+
             if let Some(redirect_to) = redirect.redirect_to {
                 builder.append_pair("redirect_to", redirect_to.as_str());
             }
@@ -107,7 +109,7 @@ fn redirect_with_params<B: FnOnce(&mut form_urlencoded::Serializer<String>)>(
     {
         builder(&mut serializer);
     }
-    Redirect::temporary(serializer.finish().as_str())
+    Redirect::to(serializer.finish().as_str())
 }
 
 #[derive(Default, Clone)]

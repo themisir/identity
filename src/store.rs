@@ -2,12 +2,14 @@ use crate::app::AppConfig;
 use anyhow::anyhow;
 use chrono::{prelude::*, Duration};
 use futures::TryStreamExt;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::{distributions, Rng};
 use sqlx::SqlitePool;
 use std::str::FromStr;
+use serde::Deserialize;
 
+#[derive(Deserialize, Debug, Copy, Clone)]
 pub enum UserRole {
-    Default,
+    User,
     Admin,
 }
 
@@ -17,12 +19,13 @@ impl FromStr for UserRole {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "admin" => Ok(UserRole::Admin),
-            "default" => Ok(UserRole::Default),
+            "user" => Ok(UserRole::User),
             _ => Err(anyhow!("invalid role name: {}", s)),
         }
     }
 }
 
+#[derive(Debug)]
 pub struct User {
     pub id: i32,
     pub username: String,
@@ -86,9 +89,8 @@ pub async fn migrate(config: &AppConfig) -> anyhow::Result<()> {
         .trim_start_matches("//")
         .to_string();
 
-    let f = std::fs::File::create(db_path.as_str())
-        .map_err(|err| anyhow!("unable to create db file: {}", err))?;
-    drop(f);
+    // make sure file exists
+    drop(std::fs::File::create_new(db_path.as_str()));
 
     let mut conf = Config::new(ConfigDbType::Sqlite).set_db_path(db_path.as_str());
 
@@ -137,7 +139,7 @@ impl UserStore {
             id: row.id,
             username: row.username,
             password_hash: row.password_hash,
-            role: UserRole::from_str(row.role_name.as_str()).unwrap_or(UserRole::Default),
+            role: UserRole::from_str(row.role_name.as_str()).unwrap_or(UserRole::User),
         }))
     }
 
@@ -164,10 +166,14 @@ impl UserStore {
         Ok(claims)
     }
 
-    pub async fn create_user(&self, username: &str, password: &str) -> anyhow::Result<User> {
+    pub async fn create_user(&self, username: &str, password: &str, role: UserRole) -> anyhow::Result<User> {
         let password_hash = User::create_hash(password.as_bytes())
             .map_err(|err| anyhow!("failed to create hash: {}", err))?;
         let (username, normalized_username) = Self::normalize_username(username);
+        let role_name = match role {
+            UserRole::User => "default",
+            UserRole::Admin => "admin"
+        };
 
         #[derive(sqlx::FromRow)]
         struct Row {
@@ -181,6 +187,7 @@ impl UserStore {
             .bind(username)
             .bind(normalized_username)
             .bind(password_hash)
+            .bind(role_name)
             .fetch_one(self.get_pool())
             .await?;
 
@@ -188,7 +195,7 @@ impl UserStore {
             id: row.id,
             username: row.username,
             password_hash: row.password_hash,
-            role: UserRole::from_str(row.role_name.as_str()).unwrap_or(UserRole::Default),
+            role: UserRole::from_str(row.role_name.as_str()).unwrap_or(UserRole::User),
         })
     }
 
@@ -227,7 +234,7 @@ impl UserStore {
                     id: row.user_id,
                     username: row.username,
                     password_hash: row.password_hash,
-                    role: UserRole::from_str(row.role_name.as_str()).unwrap_or(UserRole::Default),
+                    role: UserRole::from_str(row.role_name.as_str()).unwrap_or(UserRole::User),
                 }))
             }
         }
@@ -241,8 +248,8 @@ impl UserStore {
     ) -> anyhow::Result<String> {
         let expires_at = ttl.map(|ttl| Utc::now() + ttl);
         let session_id: String = rand::thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(7)
+            .sample_iter(&distributions::Alphanumeric)
+            .take(32)
             .map(char::from)
             .collect();
 
