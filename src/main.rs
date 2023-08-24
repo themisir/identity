@@ -1,5 +1,6 @@
 use app::{AppConfig, AppState};
 use axum::Router;
+use log::info;
 use tokio::signal;
 
 mod app;
@@ -17,6 +18,8 @@ async fn main() -> anyhow::Result<()> {
 
     let routes = Router::new()
         .with_state(app_state);
+
+    info!("Binding on {}", app_config.bind);
 
     axum::Server::bind(&app_config.bind)
         .serve(routes.into_make_service())
@@ -49,5 +52,5 @@ async fn shutdown_signal() {
         _ = terminate => {},
     }
 
-    println!("signal received, starting graceful shutdown");
+    info!("Signal received, starting graceful shutdown");
 }

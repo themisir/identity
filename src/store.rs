@@ -94,10 +94,7 @@ pub async fn migrate(config: &AppConfig) -> anyhow::Result<()> {
     let mut conf = Config::new(ConfigDbType::Sqlite)
         .set_db_path(db_path.as_str());
 
-    let report = embedded::migrations::runner().run(&mut conf)?;
-    for migration in report.applied_migrations() {
-        info!("Applied migration {}.", migration.name())
-    }
+    embedded::migrations::runner().run(&mut conf)?;
 
     Ok(())
 }
