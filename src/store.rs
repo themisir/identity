@@ -3,9 +3,9 @@ use anyhow::anyhow;
 use chrono::{prelude::*, Duration};
 use futures::TryStreamExt;
 use rand::{distributions, Rng};
+use serde::Deserialize;
 use sqlx::SqlitePool;
 use std::str::FromStr;
-use serde::Deserialize;
 
 #[derive(Deserialize, Debug, Copy, Clone)]
 pub enum UserRole {
@@ -166,13 +166,18 @@ impl UserStore {
         Ok(claims)
     }
 
-    pub async fn create_user(&self, username: &str, password: &str, role: UserRole) -> anyhow::Result<User> {
+    pub async fn create_user(
+        &self,
+        username: &str,
+        password: &str,
+        role: UserRole,
+    ) -> anyhow::Result<User> {
         let password_hash = User::create_hash(password.as_bytes())
             .map_err(|err| anyhow!("failed to create hash: {}", err))?;
         let (username, normalized_username) = Self::normalize_username(username);
         let role_name = match role {
             UserRole::User => "default",
-            UserRole::Admin => "admin"
+            UserRole::Admin => "admin",
         };
 
         #[derive(sqlx::FromRow)]

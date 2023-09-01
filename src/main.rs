@@ -1,16 +1,19 @@
 #![feature(file_create_new)]
 
 use app::{AppConfig, AppState};
-use axum::routing::{get, post};
-use axum::Router;
+use axum::{
+    middleware,
+    routing::{get, post},
+    Router,
+};
 use clap::{Args, Parser, Subcommand};
 use log::info;
 use tokio::signal;
 
 mod app;
 mod auth;
+mod proxy;
 mod store;
-
 
 /// Identity and user management proxy
 #[derive(Parser, Debug, Clone)]
@@ -74,6 +77,10 @@ async fn start_server(app_state: AppState, app_config: &AppConfig) -> anyhow::Re
         .route("/login", get(auth::show_login))
         .route("/login", post(auth::handle_login))
         .route("/logout", post(auth::logout))
+        .layer(middleware::from_fn_with_state(
+            app_state.clone(),
+            proxy::middleware,
+        ))
         .with_state(app_state);
 
     info!("Binding on {}", app_config.bind);

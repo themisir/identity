@@ -1,5 +1,8 @@
+use log::warn;
+use std::collections::HashMap;
 use std::{net::SocketAddr, path::Path, sync::Arc};
 
+use crate::proxy::ProxyClient;
 use crate::store::UserStore;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePoolOptions;
@@ -11,6 +14,7 @@ pub struct AppState(Arc<RwLock<AppStateInner>>);
 pub struct AppStateInner {
     pub config: AppConfig,
     pub store: UserStore,
+    pub upstreams: HashMap<String, ProxyClient>,
 }
 
 impl AppState {
@@ -22,9 +26,28 @@ impl AppState {
 
         let store = UserStore::new(pool);
 
-        let state = AppStateInner { config, store };
+        let mut upstreams = HashMap::<String, ProxyClient>::new();
 
-        Ok(AppState(Arc::new(RwLock::new(state))))
+        for upstream in &config.upstreams {
+            if upstreams
+                .insert(
+                    upstream.hostname.to_lowercase(),
+                    ProxyClient::new(upstream)?,
+                )
+                .is_some()
+            {
+                warn!(
+                    "There's multiple upstreams for serving hostname: {}",
+                    upstream.hostname
+                );
+            }
+        }
+
+        Ok(AppState(Arc::new(RwLock::new(AppStateInner {
+            config: config.clone(),
+            store,
+            upstreams,
+        }))))
     }
 
     pub async fn read(&self) -> RwLockReadGuard<AppStateInner> {
@@ -54,6 +77,7 @@ impl AppConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpstreamConfig {
     pub name: String,
+    pub hostname: String,
     pub target_url: String,
     pub claims: Vec<String>,
 

@@ -66,6 +66,7 @@ pub async fn handle_login(
     if let Some(user) = user {
         if user.check_password(body.password.as_bytes()) {
             // authorize!
+            // already on it do not you worry!
 
             let ttl = Some(Duration::days(30));
             let session_token = state
@@ -106,9 +107,8 @@ fn redirect_with_params<B: FnOnce(&mut form_urlencoded::Serializer<String>)>(
     builder: B,
 ) -> Redirect {
     let mut serializer = form_urlencoded::Serializer::new(String::from(prefix));
-    {
-        builder(&mut serializer);
-    }
+    builder(&mut serializer);
+
     Redirect::to(serializer.finish().as_str())
 }
 
@@ -128,16 +128,12 @@ impl AuthParams {
         Cookie::split_parse(cookie_header)
             .filter_map(|cookie| cookie.ok())
             .find(|cookie| cookie.name() == AUTH_COOKIE_NAME)
-            .map(|cookie| AuthParams {
-                session_token: Some(cookie.value().into()),
-            })
+            .map(|cookie| AuthParams::new(cookie.value().into()))
     }
 
     pub fn from_header(auth_header: &str) -> Option<Self> {
         if auth_header.len() > 7 && auth_header.starts_with("Bearer ") {
-            Some(AuthParams {
-                session_token: Some(auth_header[7..].into()),
-            })
+            Some(AuthParams::new(auth_header[7..].into()))
         } else {
             None
         }
