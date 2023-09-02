@@ -13,8 +13,9 @@ use cookie::{Cookie, SameSite};
 use log::error;
 use serde::Deserialize;
 use url::form_urlencoded;
+use crate::http::{Cookies, SetCookie};
 
-const AUTH_COOKIE_NAME: &str = "_im";
+const COOKIE_NAME: &str = "_im";
 const CORE_ISSUER: &str = "core";
 
 #[derive(Deserialize, Debug)]
@@ -124,14 +125,7 @@ impl AuthParams {
         }
     }
 
-    pub fn from_cookie(cookie_header: &str) -> Option<Self> {
-        Cookie::split_parse(cookie_header)
-            .filter_map(|cookie| cookie.ok())
-            .find(|cookie| cookie.name() == AUTH_COOKIE_NAME)
-            .map(|cookie| AuthParams::new(cookie.value().into()))
-    }
-
-    pub fn from_header(auth_header: &str) -> Option<Self> {
+    fn from_header(auth_header: &str) -> Option<Self> {
         if auth_header.len() > 7 && auth_header.starts_with("Bearer ") {
             Some(AuthParams::new(auth_header[7..].into()))
         } else {
@@ -143,18 +137,22 @@ impl AuthParams {
     where
         B: Send + 'static,
     {
-        get_header(req, COOKIE)
-            .and_then(Self::from_cookie)
+        Cookies::from_headers(req.headers())
+            .get(COOKIE_NAME)
+            .map(|cookie| AuthParams::new(cookie.value().into()))
             .or_else(|| get_header(req, AUTHORIZATION).and_then(Self::from_header))
             .unwrap_or(AuthParams {
                 session_token: None,
             })
     }
 
-    pub fn set_cookie<'c>(&self, ttl: Option<Duration>) -> SetCookie<'c> {
+    pub fn set_cookie<'c>(self, ttl: Option<Duration>) -> SetCookie<'c> {
         let ttl = ttl.unwrap_or(Duration::days(30));
-        let cookie_value = self.session_token.clone().unwrap_or("".into());
-        let cookie = Cookie::build(AUTH_COOKIE_NAME, cookie_value)
+        let cookie_value = match self.session_token {
+            None => String::default(),
+            Some(s) => s
+        };
+        let cookie = Cookie::build(COOKIE_NAME, cookie_value)
             .max_age(cookie::time::Duration::new(ttl.num_seconds(), 0))
             .path("/")
             .http_only(true)
@@ -166,19 +164,6 @@ impl AuthParams {
 
     pub fn clear_cookie<'c>() -> SetCookie<'c> {
         AuthParams::default().set_cookie(Some(Duration::seconds(1))) // short ttl, removes cookie
-    }
-}
-
-pub struct SetCookie<'c>(Cookie<'c>);
-
-impl<'c> IntoResponseParts for SetCookie<'c> {
-    type Error = StatusCode;
-
-    fn into_response_parts(self, mut res: ResponseParts) -> Result<ResponseParts, Self::Error> {
-        let value = HeaderValue::from_str(self.0.encoded().to_string().as_str())
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        res.headers_mut().append(SET_COOKIE, value);
-        Ok(res)
     }
 }
 

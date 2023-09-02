@@ -41,6 +41,8 @@ pub struct ProxyClient {
     host: Uri,
 }
 
+const COOKIE_NAME: &str = "_identity.im";
+
 impl ProxyClient {
     pub fn new(config: &UpstreamConfig) -> anyhow::Result<Self> {
         info!(
@@ -63,7 +65,17 @@ impl ProxyClient {
         self.config.name.as_str()
     }
 
-    pub async fn handle(&self, mut request: Request<Body>) -> anyhow::Result<Response> {
+    pub async fn handle(&self, request: Request<Body>) -> anyhow::Result<Response> {
+        // let cookies = Cookies::from_headers(request.headers());
+        // let cookie = cookies.get(COOKIE_NAME);
+        // if let Some(cookie) = cookie {
+        //     cookie.value()
+        // }
+
+        self.forward(request).await
+    }
+
+    async fn forward(&self, mut request: Request<Body>) -> anyhow::Result<Response> {
         let mut parts = self.host.clone().into_parts();
         parts.path_and_query = request.uri().path_and_query().map(uri::PathAndQuery::clone);
 

@@ -14,6 +14,7 @@ mod app;
 mod auth;
 mod proxy;
 mod store;
+mod http;
 
 /// Identity and user management proxy
 #[derive(Parser, Debug, Clone)]
