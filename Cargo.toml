@@ -9,9 +9,12 @@ tokio = { version = "1", features = ["full"] }
 axum = { version = "0.6" }
 axum-macros = "0.3.8"
 cookie = { version = "0.17", features = ["percent-encoding", "percent-encode"] }
+tower-http = { version = "0.4.3", features = ["trace"] }
+tracing-subscriber = { version = "0.3.17", features = ["env-filter", "tracing-log"] }
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_urlencoded = "0.7"
 
 jsonwebtoken = "8"
 ring = "0.16"
@@ -36,7 +39,7 @@ sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "chrono"] }
 refinery = { version = "0.8", features = ["rusqlite"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-url = "2.4.0"
+url = { version = "2.4.0", features = ["serde"] }
 
 log = "0.4"
 env_logger = "0.10"

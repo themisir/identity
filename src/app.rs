@@ -73,9 +73,10 @@ impl AppConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpstreamConfig {
     pub name: String,
-    pub hostname: String,
-    pub target_url: String,
     pub claims: Vec<String>,
+
+    pub upstream_url: url::Url,
+    pub origin_url: url::Url,
 
     // authorization rules
     pub require_claims: Option<Vec<String>>,
@@ -94,6 +95,7 @@ impl Upstreams {
 
         for cfg in upstreams {
             let client: Arc<ProxyClient> = ProxyClient::new(cfg)?.into();
+            let host = cfg.origin_url.authority();
 
             if by_name.insert(cfg.name.clone(), client.clone()).is_some() {
                 return Err(anyhow!(
@@ -101,10 +103,10 @@ impl Upstreams {
                     cfg.name
                 ));
             }
-            if by_host.insert(cfg.hostname.clone(), client).is_some() {
+            if by_host.insert(host.into(), client).is_some() {
                 return Err(anyhow!(
                     "upstream with the hostname {} declared more than once",
-                    cfg.hostname
+                    host
                 ));
             }
         }

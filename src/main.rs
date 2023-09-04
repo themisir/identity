@@ -1,4 +1,5 @@
 #![feature(file_create_new)]
+#![feature(iter_collect_into)]
 
 use app::{AppConfig, AppState};
 use axum::{
@@ -9,13 +10,16 @@ use axum::{
 use clap::{Args, Parser, Subcommand};
 use log::info;
 use tokio::signal;
+use tower_http::trace::TraceLayer;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod app;
 mod auth;
-mod proxy;
-mod store;
 mod http;
 mod issuer;
+mod proxy;
+mod store;
+mod uri;
 mod utils;
 
 /// Identity and user management proxy
@@ -57,7 +61,13 @@ pub struct AddUserArgs {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::init();
+    tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "identity=trace,tower_http=debug".into()),
+        )
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
     let app_args = AppArgs::parse();
 
@@ -80,11 +90,17 @@ async fn start_server(app_state: AppState, app_config: &AppConfig) -> anyhow::Re
         .route("/login", get(auth::show_login))
         .route("/login", post(auth::handle_login))
         .route("/logout", post(auth::logout))
-        .route("/.well-known/jwks.json", get(issuer::jwks))
+        .route("/authorize", get(auth::authorize))
+        .route(
+            "/.well-known/openid-configuration",
+            get(issuer::discovery_handler),
+        )
+        .route("/.well-known/jwks", get(issuer::jwk_handler))
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
             proxy::middleware,
         ))
+        .layer(TraceLayer::new_for_http())
         .with_state(app_state);
 
     info!("Binding on {}", app_config.bind);

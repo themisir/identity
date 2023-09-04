@@ -228,9 +228,9 @@ impl UserStore {
             None => Ok(None),
             Some(row) => {
                 if match (issuer, &row.issuer) {
-                    (None, _) => true,
-                    (Some(i1), Some(i2)) => i2.eq(i1),
-                    _ => false,
+                    (None, _) => false, // issuer check is not needed
+                    (Some(i1), Some(i2)) => i2 != i1, // check issuer
+                    (Some(..), None) => true, // issuer check needed, but not set for the token
                 } {
                     return Err(anyhow!("invalid issuer"));
                 }

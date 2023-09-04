@@ -1,17 +1,16 @@
+use std::borrow::Cow;
+use std::convert::Infallible;
+
 use axum::{
     async_trait,
     extract::FromRequestParts,
     http::{
         header::{COOKIE, SET_COOKIE},
-        request, HeaderValue, StatusCode,
+        request, HeaderMap, HeaderValue, StatusCode,
     },
     response::{IntoResponseParts, ResponseParts},
 };
 use cookie::Cookie;
-use hyper::HeaderMap;
-use std::borrow::Cow;
-use std::convert::Infallible;
-use url::form_urlencoded;
 
 pub struct SetCookie<'c>(pub Cookie<'c>);
 
@@ -79,28 +78,5 @@ where
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
         Ok(Self::from_headers(&parts.headers))
-    }
-}
-
-pub struct UriQueryBuilder<'a>(form_urlencoded::Serializer<'a, String>);
-
-impl<'a> UriQueryBuilder<'a> {
-    pub fn new<S>(target: S) -> Self
-    where
-        S: Into<String>,
-    {
-        Self(form_urlencoded::Serializer::new(target.into()))
-    }
-
-    pub fn append<V>(mut self, name: &str, value: V) -> Self
-    where
-        V: AsRef<str>,
-    {
-        self.0.append_pair(name, value.as_ref());
-        self
-    }
-
-    pub fn build(mut self) -> String {
-        self.0.finish()
     }
 }

@@ -1,7 +1,13 @@
 use crate::app::AppState;
 use crate::store::{User, UserClaim};
-use axum::extract::State;
-use axum::response::{IntoResponse, Response};
+
+use std::collections::HashMap;
+
+use axum::{
+    extract::State,
+    response::{IntoResponse, Response},
+    Json,
+};
 use base64::Engine;
 use chrono::Duration;
 use jsonwebtoken::jwk::{
@@ -11,15 +17,15 @@ use jsonwebtoken::jwk::{
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Validation};
 use ring::signature::{Ed25519KeyPair, KeyPair};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use axum::Json;
 
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
+    kid: String,
     iss: String,
     aud: String,
     sub: String,
     iat: i64,
+    exp: i64,
     nbf: i64,
 
     // extras
@@ -33,8 +39,19 @@ pub struct Issuer {
     encoding_key: EncodingKey,
     decoding_key: DecodingKey,
     validation: Validation,
-    jwk_set: JwkSet,
     issuer: String,
+
+    kid: String,
+    jwk_set: JwkSet,
+    discovery: DiscoverySpecs,
+}
+
+#[derive(Serialize)]
+struct DiscoverySpecs {
+    issuer: String,
+    authorization_endpoint: String,
+    jwks_uri: String,
+    id_token_signing_alg_values_supported: Vec<Algorithm>,
 }
 
 type Result<T> = jsonwebtoken::errors::Result<T>;
@@ -51,13 +68,15 @@ impl Issuer {
 
         let validation = Validation::new(Algorithm::EdDSA);
 
+        let kid = format!("idk{}", chrono::Utc::now().timestamp());
+
         let jwk_set = JwkSet {
             keys: vec![Jwk {
                 common: CommonParameters {
+                    key_id: Some(kid.clone()),
                     public_key_use: Some(PublicKeyUse::Signature),
-                    key_operations: Some(vec![KeyOperations::Verify]),
+                    key_operations: Some(vec![KeyOperations::Verify, KeyOperations::Sign]),
                     algorithm: Some(Algorithm::EdDSA),
-                    key_id: None,
                     ..Default::default()
                 },
                 algorithm: AlgorithmParameters::OctetKey(OctetKeyParameters {
@@ -67,18 +86,24 @@ impl Issuer {
             }],
         };
 
+        let discovery = DiscoverySpecs {
+            issuer: issuer.into(),
+            authorization_endpoint: format!("{}/authorize", issuer),
+            jwks_uri: format!("{}/.well-known/jwks", issuer),
+            id_token_signing_alg_values_supported: vec![Algorithm::EdDSA],
+        };
+
         Self {
             header,
             encoding_key,
             decoding_key,
             validation,
-            jwk_set,
             issuer: issuer.into(),
-        }
-    }
 
-    pub fn jwk_set(&self) -> &JwkSet {
-        &self.jwk_set
+            jwk_set,
+            discovery,
+            kid,
+        }
     }
 
     pub fn validate_token(&self, token: &str) -> Result<Claims> {
@@ -102,11 +127,13 @@ impl Issuer {
         }
 
         let claims = Claims {
+            kid: self.kid.clone(),
             iss: self.issuer.clone(),
             aud: aud.into(),
             sub: format!("{}", user.id),
             iat: now.timestamp(),
-            nbf: expires.timestamp(),
+            nbf: now.timestamp(),
+            exp: expires.timestamp(),
             name: user.username.clone(),
             extra,
         };
@@ -116,7 +143,13 @@ impl Issuer {
 }
 
 #[axum_macros::debug_handler]
-pub async fn jwks(State(state): State<AppState>) -> Response {
+pub async fn jwk_handler(State(state): State<AppState>) -> Response {
     let state = state.read().await;
-    Json(state.issuer.jwk_set()).into_response()
+    Json(&state.issuer.jwk_set).into_response()
+}
+
+#[axum_macros::debug_handler]
+pub async fn discovery_handler(State(state): State<AppState>) -> Response {
+    let state = state.read().await;
+    Json(&state.issuer.discovery).into_response()
 }

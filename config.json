@@ -5,8 +5,10 @@
   "upstreams": [
     {
       "name": "postapic",
-      "hostname": "wc.rahim.li",
-      "target_url": "https://wc.rahim.li/",
+
+      "origin_url": "https://wc.rahim.li",
+      "upstream_url": "https://wc.rahim.li",
+
       "claims": ["core:id", "core:username", "postapic:id"],
 
       "require_authentication": true,
@@ -14,11 +16,24 @@
     },
     {
       "name": "blocks",
-      "hostname": "blocks.themisir.com",
-      "target_url": "https://blocks.themisir.com/",
+
+      "origin_url": "https://blocks.themisir.com",
+      "upstream_url": "https://blocks.themisir.com",
+
       "claims": ["core:id", "core:username", "blocks:role"],
 
       "require_authentication": false,
+      "require_claims": []
+    },
+    {
+      "name": "dotnet",
+
+      "origin_url": "http://dotnet.local:3000",
+      "upstream_url": "http://127.0.0.1:5243",
+
+      "claims": ["core:id", "core:username"],
+
+      "require_authentication": true,
       "require_claims": []
     }
   ]

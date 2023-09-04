@@ -1,25 +1,27 @@
 use crate::app::{AppState, AppStateInner, UpstreamConfig};
-use crate::http::{Cookies, SetCookie, UriQueryBuilder};
-use axum::extract::path::ErrorKind;
-use axum::extract::{FromRequest, Query};
-use axum::http::header::AUTHORIZATION;
-use axum::http::uri::{InvalidUriParts, PathAndQuery};
-use axum::response::Redirect;
+use crate::auth::AuthorizeParams;
+use crate::http::{Cookies, SetCookie};
+use crate::uri::UriBuilder;
+use crate::utils::Duration;
+
+use std::str::FromStr;
+
+use axum::extract::{FromRequestParts, OriginalUri};
 use axum::{
-    extract::{Host, State},
-    http::{uri, Request, StatusCode, Uri},
+    extract::{FromRequest, Host, Query, State},
+    http::{
+        header::{HeaderValue, AUTHORIZATION},
+        Request, StatusCode, Uri,
+    },
     middleware::Next,
-    response::{IntoResponse, Response},
+    response::{IntoResponse, Redirect, Response},
 };
 use cookie::Cookie;
-use hyper::header::HeaderValue;
 use hyper::{client::HttpConnector, Body};
 use hyper_tls::HttpsConnector;
 use log::{error, info, warn};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
-use crate::utils::Duration;
 
 pub async fn middleware(
     State(state): State<AppState>,
@@ -52,32 +54,36 @@ pub static PROXY_TOKEN_TTL: Lazy<Duration> = Lazy::new(|| Duration::minutes(5));
 pub struct ProxyClient {
     config: UpstreamConfig,
     client: hyper::Client<HttpsConnector<HttpConnector>>,
-    host: Uri,
+    hostname: String,
+    upstream_uri: Uri,
+    origin: String,
 }
 
 const COOKIE_NAME: &str = "_identity.im";
 
 #[derive(Serialize, Deserialize)]
-struct AuthorizeQuery {
-    token: String,
-    redirect_to: Option<String>,
+pub struct UpstreamAuthorizeParams {
+    pub token: String,
+    pub redirect_to: String,
 }
 
 impl ProxyClient {
-    pub fn new(config: &UpstreamConfig) -> anyhow::Result<Self> {
-        info!(
-            "create upstream client {} for {}",
-            config.name, config.hostname
-        );
+    pub fn new(cfg: &UpstreamConfig) -> anyhow::Result<Self> {
+        let hostname = cfg.upstream_url.host_str().unwrap().into();
 
         let https = HttpsConnector::new();
-        let client = hyper::Client::builder().build::<_, hyper::Body>(https);
-        let host = Uri::from_str(config.target_url.as_str())?;
+        let client = hyper::Client::builder().build::<_, Body>(https);
+
+        let upstream_uri = Uri::from_str(cfg.upstream_url.as_str())?;
+
+        let origin = cfg.origin_url.origin().ascii_serialization();
 
         Ok(Self {
-            config: config.clone(),
+            config: cfg.clone(),
             client,
-            host,
+            hostname,
+            upstream_uri,
+            origin,
         })
     }
 
@@ -85,8 +91,8 @@ impl ProxyClient {
         self.config.name.as_str()
     }
 
-    pub fn host(&self) -> &Uri {
-        &self.host
+    pub fn origin(&self) -> &str {
+        self.origin.as_str()
     }
 
     pub async fn handle(
@@ -110,7 +116,7 @@ impl ProxyClient {
             }
         }
 
-        Ok(self.redirect_to_authorization(&request, state))
+        Ok(self.redirect_to_authorization(request, state).await)
     }
 
     async fn authorize(
@@ -118,11 +124,7 @@ impl ProxyClient {
         request: Request<Body>,
         state: &AppStateInner,
     ) -> anyhow::Result<impl IntoResponse> {
-        let query = Query::<AuthorizeQuery>::from_request(request, state).await?;
-        let redirect_to = match &query.redirect_to {
-            None => "",
-            Some(s) => s.as_str(),
-        };
+        let query = Query::<UpstreamAuthorizeParams>::from_request(request, state).await?;
 
         Ok((
             SetCookie(
@@ -132,36 +134,59 @@ impl ProxyClient {
                     .max_age((*PROXY_TOKEN_TTL).into())
                     .finish(),
             ),
-            Redirect::to(redirect_to),
+            Redirect::to(query.redirect_to.as_str()),
         ))
     }
 
-    fn redirect_to_authorization<B>(
-        &self,
-        request: &Request<B>,
-        state: &AppStateInner,
-    ) -> Response {
-        Redirect::to(
-            UriQueryBuilder::new(format!("{}/login?", state.config.base_url))
-                .append("client_id", &self.config.name)
-                .append("redirect_to", request.uri().to_string())
-                .build()
-                .as_str(),
-        )
-        .into_response()
+    async fn resolve_full_url<B>(&self, request: Request<B>, state: &AppStateInner) -> String {
+        let (mut parts, _) = request.into_parts();
+        let host = Host::from_request_parts(&mut parts, state).await;
+        let OriginalUri(uri) = OriginalUri::from_request_parts(&mut parts, state)
+            .await
+            .unwrap();
+
+        let scheme = uri
+            .scheme_str()
+            .unwrap_or(self.config.origin_url.scheme());
+
+        match (host, uri.path_and_query()) {
+            (Ok(host), Some(path_and_query)) => {
+                if path_and_query.path().starts_with('/') {
+                    format!("{}://{}{}", scheme, host.0, path_and_query)
+                } else {
+                    format!("{}://{}/{}", scheme, host.0, path_and_query)
+                }
+            }
+            _ => format!("{}", uri),
+        }
     }
 
-    pub fn upstream_uri(&self, path_and_query: Option<PathAndQuery>) -> anyhow::Result<Uri> {
-        let mut parts = self.host.clone().into_parts();
-        parts.path_and_query = path_and_query;
-        Ok(Uri::from_parts(parts)?)
+    async fn redirect_to_authorization<B>(
+        &self,
+        request: Request<B>,
+        state: &AppStateInner,
+    ) -> Response
+    where
+        B: Send + 'static,
+    {
+        let full_uri = self.resolve_full_url(request, state).await;
+        let redirect_uri = UriBuilder::from_str(state.config.base_url.as_str())
+            .unwrap()
+            .append_path("/authorize")
+            .append_params(AuthorizeParams {
+                client_id: self.config.name.to_string(),
+                redirect_to: full_uri,
+            })
+            .to_string();
+
+        Redirect::to(redirect_uri.as_str()).into_response()
     }
 
     async fn forward(&self, mut request: Request<Body>) -> anyhow::Result<Response> {
-        let mut parts = self.host.clone().into_parts();
-        parts.path_and_query = request.uri().path_and_query().map(uri::PathAndQuery::clone);
+        let mut parts = self.upstream_uri.clone().into_parts();
+        parts.path_and_query = request.uri().path_and_query().cloned();
+        let uri = Uri::from_parts(parts)?;
 
-        let uri = self.upstream_uri(request.uri().path_and_query().cloned())?;
         info!("Forwarding {} to {}", request.uri(), uri);
         *request.uri_mut() = uri;
 

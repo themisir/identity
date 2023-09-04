@@ -1,27 +1,26 @@
 use crate::app::AppState;
-use crate::http::{Cookies, SetCookie, UriQueryBuilder};
-use crate::proxy::{ProxyClient, PROXY_AUTHORIZE_ENDPOINT, PROXY_TOKEN_TTL};
+use crate::http::{Cookies, SetCookie};
+use crate::proxy::{UpstreamAuthorizeParams, PROXY_AUTHORIZE_ENDPOINT, PROXY_TOKEN_TTL};
 use crate::store::{User, UserStore};
-use async_trait::async_trait;
-use axum::body::BoxBody;
-use axum::extract::FromRequestParts;
-use axum::http::request::Parts;
-use axum::http::Response;
+use crate::uri::UriBuilder;
+
+use std::convert::Infallible;
+
 use axum::{
-    extract::{Query, State},
+    async_trait,
+    extract::{FromRequestParts, Query, State},
     http::{
         header::{AsHeaderName, AUTHORIZATION},
-        Request, StatusCode,
+        request::Parts,
+        HeaderMap, StatusCode,
     },
     response::{Html, IntoResponse, Redirect},
     Form,
 };
 use chrono::Duration;
 use cookie::{Cookie, SameSite};
-use hyper::{Body, HeaderMap};
 use log::error;
-use serde::Deserialize;
-use std::convert::Infallible;
+use serde::{Deserialize, Serialize};
 
 const COOKIE_NAME: &str = "_im";
 const CORE_ISSUER: &str = "core";
@@ -32,9 +31,8 @@ pub struct LoginRequestBody {
     password: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct RedirectParams {
-    client_id: Option<String>,
     redirect_to: Option<String>,
 }
 
@@ -48,22 +46,43 @@ pub async fn logout(Query(redirect): Query<RedirectParams>) -> impl IntoResponse
     )
 }
 
-#[axum_macros::debug_handler]
-pub async fn show_login(
-    State(state): State<AppState>,
-    Query(redirect): Query<RedirectParams>,
-    auth: AuthParams,
-) -> Result<Response<BoxBody>, StatusCode> {
-    let state = state.read().await;
-    let user = auth.find_user(&state.store).await.map_err(|err| {
-        error!("failed to find user: {}", err);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+#[derive(Serialize, Deserialize, Debug)]
+pub struct AuthorizeParams {
+    pub client_id: String,
+    pub redirect_to: String,
+}
 
-    let response = match (user, redirect.redirect_to, redirect.client_id) {
-        (Some(user), Some(redirect_to), Some(client_id)) => {
-            match state.upstreams.find_by_name(client_id.as_str()) {
-                None => StatusCode::BAD_REQUEST.into_response(),
+#[axum_macros::debug_handler]
+pub async fn authorize(
+    State(state): State<AppState>,
+    Query(params): Query<AuthorizeParams>,
+    auth: AuthParams,
+) -> Result<Redirect, StatusCode> {
+    let state = state.read().await;
+    let user = auth.find_user(&state.store).await.unwrap_or_else(|err| {
+        error!("failed to find user: {}", err);
+        None
+    });
+
+    match user {
+        None => {
+            let authorize_uri = UriBuilder::new()
+                .append_path("/authorize")
+                .append_params(params)
+                .to_string();
+
+            let redirect_uri = UriBuilder::new()
+                .append_path("/login")
+                .append_params(RedirectParams {
+                    redirect_to: Some(authorize_uri),
+                })
+                .to_string();
+
+            Ok(Redirect::to(redirect_uri.as_str()))
+        }
+        Some(user) => {
+            match state.upstreams.find_by_name(params.client_id.as_str()) {
+                None => Err(StatusCode::BAD_REQUEST),
                 Some(upstream) => {
                     let claims = state.store.get_user_claims(user.id).await.map_err(|err| {
                         error!("failed to get user {} claims: {}", user.id, err);
@@ -74,43 +93,42 @@ pub async fn show_login(
 
                     let token = state
                         .issuer
-                        .create_token(upstream.name(), &user, claims.as_ref(), (*PROXY_TOKEN_TTL).into())
+                        .create_token(
+                            upstream.name(),
+                            &user,
+                            claims.as_ref(),
+                            (*PROXY_TOKEN_TTL).into(),
+                        )
                         .map_err(|err| {
                             error!("failed to create token: {}", err);
                             StatusCode::INTERNAL_SERVER_ERROR
                         })?;
 
-                    let path_and_query = UriQueryBuilder::new(PROXY_AUTHORIZE_ENDPOINT)
-                        .append("redirect_to", redirect_to)
-                        .append("token", token)
-                        .build()
-                        .try_into()
-                        .map_err(|err| {
-                            error!("failed to build uri: {}", err);
-                            StatusCode::INTERNAL_SERVER_ERROR
-                        })?;
+                    let upstream_authorize_uri = UriBuilder::new()
+                        .set_origin(upstream.origin())
+                        .set_path(PROXY_AUTHORIZE_ENDPOINT)
+                        .append_params(UpstreamAuthorizeParams {
+                            token,
+                            redirect_to: params.redirect_to,
+                        })
+                        .to_string();
 
-                    let redirect_to_uri = upstream.upstream_uri(Some(path_and_query)).map_err(|err| {
-                        error!("failed to create uri: {}", err);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })?;
-
-                    Redirect::to(redirect_to_uri.to_string().as_str()).into_response()
+                    Ok(Redirect::to(upstream_authorize_uri.as_str()))
                 }
             }
         }
-        (Some(_), Some(redirect_to), None) => Redirect::to(redirect_to.as_str()).into_response(),
-        (Some(_), None, _) => Redirect::to("/").into_response(),
-        _ => Html(include_str!("ui/login.html")).into_response(),
-    };
+    }
+}
 
-    Ok(response)
+#[axum_macros::debug_handler]
+pub async fn show_login() -> impl IntoResponse {
+    Html(include_str!("ui/login.html"))
 }
 
 #[axum_macros::debug_handler]
 pub async fn handle_login(
     State(state): State<AppState>,
-    Query(redirect): Query<RedirectParams>,
+    Query(params): Query<RedirectParams>,
     Form(body): Form<LoginRequestBody>,
 ) -> Result<impl IntoResponse, StatusCode> {
     let state = state.read().await;
@@ -145,7 +163,7 @@ pub async fn handle_login(
                     StatusCode::INTERNAL_SERVER_ERROR
                 })?;
 
-            let redirect_to = redirect.redirect_to.unwrap_or("/".to_string());
+            let redirect_to = params.redirect_to.unwrap_or("/".to_string());
 
             return Ok((
                 AuthParams::new(session_token).set_cookie(Some(Duration::days(30))),
@@ -154,19 +172,18 @@ pub async fn handle_login(
         }
     }
 
-    let mut login_uri = UriQueryBuilder::new(format!("{}/login?", state.config.base_url));
-    if let Some(redirect_to) = redirect.redirect_to {
-        login_uri = login_uri.append("redirect_to", redirect_to);
+    let mut login_uri = UriBuilder::from_str(state.config.base_url.as_str())
+        .unwrap()
+        .set_path("/login")
+        .append_param("error", "invalid_password");
+
+    if let Some(redirect_to) = params.redirect_to {
+        login_uri = login_uri.append_param("redirect_to", redirect_to);
     }
 
     Ok((
         AuthParams::clear_cookie(),
-        Redirect::to(
-            login_uri
-                .append("error", "invalid_password")
-                .build()
-                .as_str(),
-        ),
+        Redirect::to(login_uri.to_string().as_str()),
     ))
 }
 
@@ -219,7 +236,7 @@ impl FromRequestParts<AppState> for AuthParams {
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &AppState,
+        _state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         let params = Cookies::from_headers(&parts.headers)
             .get(COOKIE_NAME)
