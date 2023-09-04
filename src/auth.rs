@@ -1,19 +1,27 @@
 use crate::app::AppState;
+use crate::http::{Cookies, SetCookie, UriQueryBuilder};
+use crate::proxy::{ProxyClient, PROXY_AUTHORIZE_ENDPOINT, PROXY_TOKEN_TTL};
+use crate::store::{User, UserStore};
+use async_trait::async_trait;
+use axum::body::BoxBody;
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use axum::http::Response;
 use axum::{
     extract::{Query, State},
     http::{
-        header::{AsHeaderName, AUTHORIZATION, COOKIE, SET_COOKIE},
-        HeaderValue, Request, StatusCode,
+        header::{AsHeaderName, AUTHORIZATION},
+        Request, StatusCode,
     },
-    response::{Html, IntoResponse, IntoResponseParts, Redirect, ResponseParts},
+    response::{Html, IntoResponse, Redirect},
     Form,
 };
 use chrono::Duration;
 use cookie::{Cookie, SameSite};
+use hyper::{Body, HeaderMap};
 use log::error;
 use serde::Deserialize;
-use url::form_urlencoded;
-use crate::http::{Cookies, SetCookie};
+use std::convert::Infallible;
 
 const COOKIE_NAME: &str = "_im";
 const CORE_ISSUER: &str = "core";
@@ -26,6 +34,7 @@ pub struct LoginRequestBody {
 
 #[derive(Deserialize, Debug)]
 pub struct RedirectParams {
+    client_id: Option<String>,
     redirect_to: Option<String>,
 }
 
@@ -40,8 +49,62 @@ pub async fn logout(Query(redirect): Query<RedirectParams>) -> impl IntoResponse
 }
 
 #[axum_macros::debug_handler]
-pub async fn show_login() -> impl IntoResponse {
-    Html(include_str!("ui/login.html"))
+pub async fn show_login(
+    State(state): State<AppState>,
+    Query(redirect): Query<RedirectParams>,
+    auth: AuthParams,
+) -> Result<Response<BoxBody>, StatusCode> {
+    let state = state.read().await;
+    let user = auth.find_user(&state.store).await.map_err(|err| {
+        error!("failed to find user: {}", err);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let response = match (user, redirect.redirect_to, redirect.client_id) {
+        (Some(user), Some(redirect_to), Some(client_id)) => {
+            match state.upstreams.find_by_name(client_id.as_str()) {
+                None => StatusCode::BAD_REQUEST.into_response(),
+                Some(upstream) => {
+                    let claims = state.store.get_user_claims(user.id).await.map_err(|err| {
+                        error!("failed to get user {} claims: {}", user.id, err);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?;
+
+                    // todo: filter claims for client
+
+                    let token = state
+                        .issuer
+                        .create_token(upstream.name(), &user, claims.as_ref(), (*PROXY_TOKEN_TTL).into())
+                        .map_err(|err| {
+                            error!("failed to create token: {}", err);
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        })?;
+
+                    let path_and_query = UriQueryBuilder::new(PROXY_AUTHORIZE_ENDPOINT)
+                        .append("redirect_to", redirect_to)
+                        .append("token", token)
+                        .build()
+                        .try_into()
+                        .map_err(|err| {
+                            error!("failed to build uri: {}", err);
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        })?;
+
+                    let redirect_to_uri = upstream.upstream_uri(Some(path_and_query)).map_err(|err| {
+                        error!("failed to create uri: {}", err);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?;
+
+                    Redirect::to(redirect_to_uri.to_string().as_str()).into_response()
+                }
+            }
+        }
+        (Some(_), Some(redirect_to), None) => Redirect::to(redirect_to.as_str()).into_response(),
+        (Some(_), None, _) => Redirect::to("/").into_response(),
+        _ => Html(include_str!("ui/login.html")).into_response(),
+    };
+
+    Ok(response)
 }
 
 #[axum_macros::debug_handler]
@@ -91,30 +154,24 @@ pub async fn handle_login(
         }
     }
 
+    let mut login_uri = UriQueryBuilder::new(format!("{}/login?", state.config.base_url));
+    if let Some(redirect_to) = redirect.redirect_to {
+        login_uri = login_uri.append("redirect_to", redirect_to);
+    }
+
     Ok((
         AuthParams::clear_cookie(),
-        redirect_with_params("/login?", move |builder| {
-            builder.append_pair("error", "invalid_password");
-
-            if let Some(redirect_to) = redirect.redirect_to {
-                builder.append_pair("redirect_to", redirect_to.as_str());
-            }
-        }),
+        Redirect::to(
+            login_uri
+                .append("error", "invalid_password")
+                .build()
+                .as_str(),
+        ),
     ))
 }
 
-fn redirect_with_params<B: FnOnce(&mut form_urlencoded::Serializer<String>)>(
-    prefix: &str,
-    builder: B,
-) -> Redirect {
-    let mut serializer = form_urlencoded::Serializer::new(String::from(prefix));
-    builder(&mut serializer);
-
-    Redirect::to(serializer.finish().as_str())
-}
-
 #[derive(Default, Clone)]
-struct AuthParams {
+pub struct AuthParams {
     pub session_token: Option<String>,
 }
 
@@ -125,32 +182,11 @@ impl AuthParams {
         }
     }
 
-    fn from_header(auth_header: &str) -> Option<Self> {
-        if auth_header.len() > 7 && auth_header.starts_with("Bearer ") {
-            Some(AuthParams::new(auth_header[7..].into()))
-        } else {
-            None
-        }
-    }
-
-    pub fn from_request<B>(req: &Request<B>) -> Self
-    where
-        B: Send + 'static,
-    {
-        Cookies::from_headers(req.headers())
-            .get(COOKIE_NAME)
-            .map(|cookie| AuthParams::new(cookie.value().into()))
-            .or_else(|| get_header(req, AUTHORIZATION).and_then(Self::from_header))
-            .unwrap_or(AuthParams {
-                session_token: None,
-            })
-    }
-
     pub fn set_cookie<'c>(self, ttl: Option<Duration>) -> SetCookie<'c> {
         let ttl = ttl.unwrap_or(Duration::days(30));
         let cookie_value = match self.session_token {
             None => String::default(),
-            Some(s) => s
+            Some(s) => s,
         };
         let cookie = Cookie::build(COOKIE_NAME, cookie_value)
             .max_age(cookie::time::Duration::new(ttl.num_seconds(), 0))
@@ -165,14 +201,49 @@ impl AuthParams {
     pub fn clear_cookie<'c>() -> SetCookie<'c> {
         AuthParams::default().set_cookie(Some(Duration::seconds(1))) // short ttl, removes cookie
     }
+
+    pub async fn find_user(&self, store: &UserStore) -> anyhow::Result<Option<User>> {
+        if let Some(token) = &self.session_token {
+            store
+                .find_user_by_session(token.as_str(), Some(CORE_ISSUER))
+                .await
+        } else {
+            Ok(None)
+        }
+    }
 }
 
-fn get_header<B, K>(req: &Request<B>, key: K) -> Option<&str>
+#[async_trait]
+impl FromRequestParts<AppState> for AuthParams {
+    type Rejection = Infallible;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let params = Cookies::from_headers(&parts.headers)
+            .get(COOKIE_NAME)
+            .map(|cookie| AuthParams::new(cookie.value().into()))
+            .or_else(|| {
+                get_header(&parts.headers, AUTHORIZATION).and_then(|auth_header| {
+                    if auth_header.len() > 7 && auth_header.starts_with("Bearer ") {
+                        Some(AuthParams::new(auth_header[7..].into()))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or(Self {
+                session_token: None,
+            });
+
+        Ok(params)
+    }
+}
+
+fn get_header<K>(headers: &HeaderMap, key: K) -> Option<&str>
 where
-    B: Send + 'static,
     K: AsHeaderName,
 {
-    req.headers()
-        .get(key)
-        .and_then(|header| header.to_str().ok())
+    headers.get(key).and_then(|header| header.to_str().ok())
 }

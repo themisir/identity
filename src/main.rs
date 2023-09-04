@@ -15,6 +15,8 @@ mod auth;
 mod proxy;
 mod store;
 mod http;
+mod issuer;
+mod utils;
 
 /// Identity and user management proxy
 #[derive(Parser, Debug, Clone)]
@@ -78,6 +80,7 @@ async fn start_server(app_state: AppState, app_config: &AppConfig) -> anyhow::Re
         .route("/login", get(auth::show_login))
         .route("/login", post(auth::handle_login))
         .route("/logout", post(auth::logout))
+        .route("/.well-known/jwks.json", get(issuer::jwks))
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
             proxy::middleware,

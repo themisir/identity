@@ -9,9 +9,9 @@ use axum::{
 };
 use cookie::Cookie;
 use hyper::HeaderMap;
-use serde_json::from_str;
 use std::borrow::Cow;
 use std::convert::Infallible;
+use url::form_urlencoded;
 
 pub struct SetCookie<'c>(pub Cookie<'c>);
 
@@ -54,6 +54,17 @@ impl<'c> Cookies<'c> {
             .and_then(|header| header.to_str().ok())
             .map_or(Self::default(), |value| Self::from_str(value.to_owned()))
     }
+
+    pub fn extract_one<'a>(headers: &'a HeaderMap, name: &str) -> Option<Cookie<'a>> {
+        headers
+            .get(COOKIE)
+            .and_then(|header| header.to_str().ok())
+            .and_then(|value| {
+                Cookie::split_parse(value)
+                    .filter_map(|c| c.ok())
+                    .find(|c| c.name() == name)
+            })
+    }
 }
 
 #[async_trait]
@@ -68,5 +79,28 @@ where
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
         Ok(Self::from_headers(&parts.headers))
+    }
+}
+
+pub struct UriQueryBuilder<'a>(form_urlencoded::Serializer<'a, String>);
+
+impl<'a> UriQueryBuilder<'a> {
+    pub fn new<S>(target: S) -> Self
+    where
+        S: Into<String>,
+    {
+        Self(form_urlencoded::Serializer::new(target.into()))
+    }
+
+    pub fn append<V>(mut self, name: &str, value: V) -> Self
+    where
+        V: AsRef<str>,
+    {
+        self.0.append_pair(name, value.as_ref());
+        self
+    }
+
+    pub fn build(mut self) -> String {
+        self.0.finish()
     }
 }
