@@ -1,0 +1,11 @@
+﻿<wpf:ResourceDictionary xml:space="preserve" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:s="clr-namespace:System;assembly=mscorlib" xmlns:ss="urn:shemas-jetbrains-com:settings-storage-xaml" xmlns:wpf="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+	<s:String x:Key="/Default/Environment/AssemblyExplorer/XmlDocument/@EntryValue">&lt;AssemblyExplorer&gt;
+  &lt;PhysicalFolder Path="/Users/misir/.nuget/packages/microsoft.aspnetcore.authentication.jwtbearer/3.1.11" Loaded="True" /&gt;
+  &lt;PhysicalFolder Path="/Users/misir/.nuget/packages/microsoft.aspnetcore.authentication.jwtbearer/3.1.12" Loaded="True" /&gt;
+  &lt;PhysicalFolder Path="/Users/misir/.nuget/packages/microsoft.aspnetcore.authentication.jwtbearer/3.1.14" Loaded="True" /&gt;
+  &lt;PhysicalFolder Path="/Users/misir/.nuget/packages/microsoft.aspnetcore.authentication.jwtbearer/3.1.18" Loaded="True" /&gt;
+  &lt;PhysicalFolder Path="/Users/misir/.nuget/packages/microsoft.aspnetcore.authentication.jwtbearer/3.1.6" Loaded="True" /&gt;
+  &lt;PhysicalFolder Path="/Users/misir/.nuget/packages/microsoft.aspnetcore.authentication.jwtbearer/5.0.3" Loaded="True" /&gt;
+  &lt;PhysicalFolder Path="/Users/misir/.nuget/packages/microsoft.aspnetcore.authentication.jwtbearer/5.0.5" Loaded="True" /&gt;
+  &lt;PhysicalFolder Path="/Users/misir/.nuget/packages/microsoft.aspnetcore.authentication.jwtbearer/7.0.10" Loaded="True" /&gt;
+&lt;/AssemblyExplorer&gt;</s:String></wpf:ResourceDictionary>
