@@ -11,16 +11,15 @@ use axum::{
 use base64::Engine;
 use chrono::Duration;
 use jsonwebtoken::jwk::{
-    AlgorithmParameters, CommonParameters, Jwk, JwkSet, KeyOperations, OctetKeyParameters,
-    OctetKeyType, PublicKeyUse,
+    AlgorithmParameters, CommonParameters, Jwk, JwkSet, KeyOperations, PublicKeyUse,
+    RSAKeyParameters, RSAKeyType,
 };
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Validation};
-use ring::signature::{Ed25519KeyPair, KeyPair};
+use openssl::rsa::Rsa;
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
-    kid: String,
     iss: String,
     aud: String,
     sub: String,
@@ -41,7 +40,6 @@ pub struct Issuer {
     validation: Validation,
     issuer: String,
 
-    kid: String,
     jwk_set: JwkSet,
     discovery: DiscoverySpecs,
 }
@@ -58,15 +56,21 @@ type Result<T> = jsonwebtoken::errors::Result<T>;
 
 impl Issuer {
     pub fn new(issuer: &str) -> Self {
-        let header = jsonwebtoken::Header::new(Algorithm::EdDSA);
+        let algorithm = Algorithm::RS256;
+        let mut header = jsonwebtoken::Header::new(algorithm);
 
-        let doc = Ed25519KeyPair::generate_pkcs8(&ring::rand::SystemRandom::new()).unwrap();
-        let encoding_key = EncodingKey::from_ed_der(doc.as_ref());
+        let rsa_keys = Rsa::generate(2048).expect("Failed to generate RSA keys.");
+        let private_key_pem = rsa_keys
+            .private_key_to_pem()
+            .expect("Failed to extract private key to PEM.");
+        let public_key_pem = rsa_keys
+            .public_key_to_pem()
+            .expect("Failed to extract public key to PEM.");
 
-        let pair = Ed25519KeyPair::from_pkcs8(doc.as_ref()).unwrap();
-        let decoding_key = DecodingKey::from_ed_der(pair.public_key().as_ref());
+        let encoding_key = EncodingKey::from_rsa_pem(&private_key_pem).unwrap();
+        let decoding_key = DecodingKey::from_rsa_pem(&public_key_pem).unwrap();
 
-        let validation = Validation::new(Algorithm::EdDSA);
+        let validation = Validation::new(algorithm);
 
         let kid = format!("idk{}", chrono::Utc::now().timestamp());
 
@@ -76,12 +80,13 @@ impl Issuer {
                     key_id: Some(kid.clone()),
                     public_key_use: Some(PublicKeyUse::Signature),
                     key_operations: Some(vec![KeyOperations::Verify, KeyOperations::Sign]),
-                    algorithm: Some(Algorithm::EdDSA),
+                    algorithm: Some(Algorithm::RS256),
                     ..Default::default()
                 },
-                algorithm: AlgorithmParameters::OctetKey(OctetKeyParameters {
-                    key_type: OctetKeyType::Octet,
-                    value: base64::engine::general_purpose::STANDARD.encode(doc.as_ref()),
+                algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
+                    key_type: RSAKeyType::RSA,
+                    n: base64::engine::general_purpose::STANDARD.encode(rsa_keys.n().to_vec()),
+                    e: base64::engine::general_purpose::STANDARD.encode(rsa_keys.e().to_vec()),
                 }),
             }],
         };
@@ -93,6 +98,8 @@ impl Issuer {
             id_token_signing_alg_values_supported: vec![Algorithm::EdDSA],
         };
 
+        header.kid = Some(kid);
+
         Self {
             header,
             encoding_key,
@@ -102,7 +109,6 @@ impl Issuer {
 
             jwk_set,
             discovery,
-            kid,
         }
     }
 
@@ -127,7 +133,6 @@ impl Issuer {
         }
 
         let claims = Claims {
-            kid: self.kid.clone(),
             iss: self.issuer.clone(),
             aud: aud.into(),
             sub: format!("{}", user.id),
@@ -144,12 +149,10 @@ impl Issuer {
 
 #[axum_macros::debug_handler]
 pub async fn jwk_handler(State(state): State<AppState>) -> Response {
-    let state = state.read().await;
-    Json(&state.issuer.jwk_set).into_response()
+    Json(&state.issuer().jwk_set).into_response()
 }
 
 #[axum_macros::debug_handler]
 pub async fn discovery_handler(State(state): State<AppState>) -> Response {
-    let state = state.read().await;
-    Json(&state.issuer.discovery).into_response()
+    Json(&state.issuer().discovery).into_response()
 }

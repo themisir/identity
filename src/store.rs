@@ -235,6 +235,12 @@ impl UserStore {
                     return Err(anyhow!("invalid issuer"));
                 }
 
+                if let Some(expires_at) = row.expires_at {
+                    if Utc::now() > expires_at {
+                        return Err(anyhow!("expired session"))
+                    }
+                }
+
                 Ok(Some(User {
                     id: row.user_id,
                     username: row.username,

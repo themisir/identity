@@ -58,8 +58,7 @@ pub async fn authorize(
     Query(params): Query<AuthorizeParams>,
     auth: AuthParams,
 ) -> Result<Redirect, StatusCode> {
-    let state = state.read().await;
-    let user = auth.find_user(&state.store).await.unwrap_or_else(|err| {
+    let user = auth.find_user(state.store()).await.unwrap_or_else(|err| {
         error!("failed to find user: {}", err);
         None
     });
@@ -81,18 +80,22 @@ pub async fn authorize(
             Ok(Redirect::to(redirect_uri.as_str()))
         }
         Some(user) => {
-            match state.upstreams.find_by_name(params.client_id.as_str()) {
+            match state.upstreams().find_by_name(params.client_id.as_str()) {
                 None => Err(StatusCode::BAD_REQUEST),
                 Some(upstream) => {
-                    let claims = state.store.get_user_claims(user.id).await.map_err(|err| {
-                        error!("failed to get user {} claims: {}", user.id, err);
-                        StatusCode::INTERNAL_SERVER_ERROR
-                    })?;
+                    let claims = state
+                        .store()
+                        .get_user_claims(user.id)
+                        .await
+                        .map_err(|err| {
+                            error!("failed to get user {} claims: {}", user.id, err);
+                            StatusCode::INTERNAL_SERVER_ERROR
+                        })?;
 
                     // todo: filter claims for client
 
                     let token = state
-                        .issuer
+                        .issuer()
                         .create_token(
                             upstream.name(),
                             &user,
@@ -131,10 +134,8 @@ pub async fn handle_login(
     Query(params): Query<RedirectParams>,
     Form(body): Form<LoginRequestBody>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let state = state.read().await;
-
     let user = state
-        .store
+        .store()
         .find_user_by_username(body.username.as_str())
         .await
         .map_err(|err| {
@@ -152,7 +153,7 @@ pub async fn handle_login(
 
             let ttl = Some(Duration::days(30));
             let session_token = state
-                .store
+                .store()
                 .create_user_session(user.id, CORE_ISSUER, ttl)
                 .await
                 .map_err(|err| {
@@ -172,7 +173,7 @@ pub async fn handle_login(
         }
     }
 
-    let mut login_uri = UriBuilder::from_str(state.config.base_url.as_str())
+    let mut login_uri = UriBuilder::from_str(state.config().base_url.as_str())
         .unwrap()
         .set_path("/login")
         .append_param("error", "invalid_password");

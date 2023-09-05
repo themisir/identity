@@ -114,9 +114,8 @@ async fn start_server(app_state: AppState, app_config: &AppConfig) -> anyhow::Re
 }
 
 async fn add_user(app_state: AppState, args: &AddUserArgs) -> anyhow::Result<()> {
-    let app_state = app_state.read().await;
     let user = app_state
-        .store
+        .store()
         .create_user(args.username.as_str(), args.password.as_str(), args.role)
         .await?;
 

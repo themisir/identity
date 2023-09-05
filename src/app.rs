@@ -1,17 +1,17 @@
-use anyhow::anyhow;
 use std::{collections::HashMap, net::SocketAddr, path::Path, sync::Arc};
 
 use crate::issuer::Issuer;
 use crate::proxy::ProxyClient;
 use crate::store::UserStore;
+
+use anyhow::anyhow;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePoolOptions;
-use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 #[derive(Clone)]
-pub struct AppState(Arc<RwLock<AppStateInner>>);
+pub struct AppState(Arc<AppStateInner>);
 
-pub struct AppStateInner {
+struct AppStateInner {
     pub config: AppConfig,
     pub store: UserStore,
     pub upstreams: Upstreams,
@@ -19,6 +19,22 @@ pub struct AppStateInner {
 }
 
 impl AppState {
+    pub fn config(&self) -> &AppConfig {
+        &self.0.config
+    }
+
+    pub fn store(&self) -> &UserStore {
+        &self.0.store
+    }
+
+    pub fn upstreams(&self) -> &Upstreams {
+        &self.0.upstreams
+    }
+
+    pub fn issuer(&self) -> &Issuer {
+        &self.0.issuer
+    }
+
     pub async fn from_config(config: AppConfig) -> anyhow::Result<Self> {
         // create db pool and store
         let pool = SqlitePoolOptions::new()
@@ -33,20 +49,12 @@ impl AppState {
         // upstream clients
         let upstreams = Upstreams::from_config(config.upstreams.as_ref())?;
 
-        Ok(AppState(Arc::new(RwLock::new(AppStateInner {
+        Ok(AppState(Arc::new(AppStateInner {
             config: config.clone(),
             store,
             upstreams,
             issuer,
-        }))))
-    }
-
-    pub async fn read(&self) -> RwLockReadGuard<AppStateInner> {
-        self.0.read().await
-    }
-
-    pub async fn write(&self) -> RwLockWriteGuard<AppStateInner> {
-        self.0.write().await
+        })))
     }
 }
 

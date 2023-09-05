@@ -1,4 +1,4 @@
-use crate::app::{AppState, AppStateInner, UpstreamConfig};
+use crate::app::{AppState, UpstreamConfig};
 use crate::auth::AuthorizeParams;
 use crate::http::{Cookies, SetCookie};
 use crate::uri::UriBuilder;
@@ -29,10 +29,9 @@ pub async fn middleware(
     request: Request<Body>,
     next: Next<Body>,
 ) -> Result<Response, StatusCode> {
-    let state = state.read().await;
     let upstream = {
         let host = host.to_lowercase();
-        state.upstreams.find_by_host(host.as_str())
+        state.upstreams().find_by_host(host.as_str())
     };
 
     match upstream {
@@ -54,7 +53,6 @@ pub static PROXY_TOKEN_TTL: Lazy<Duration> = Lazy::new(|| Duration::minutes(5));
 pub struct ProxyClient {
     config: UpstreamConfig,
     client: hyper::Client<HttpsConnector<HttpConnector>>,
-    hostname: String,
     upstream_uri: Uri,
     origin: String,
 }
@@ -69,8 +67,6 @@ pub struct UpstreamAuthorizeParams {
 
 impl ProxyClient {
     pub fn new(cfg: &UpstreamConfig) -> anyhow::Result<Self> {
-        let hostname = cfg.upstream_url.host_str().unwrap().into();
-
         let https = HttpsConnector::new();
         let client = hyper::Client::builder().build::<_, Body>(https);
 
@@ -81,7 +77,6 @@ impl ProxyClient {
         Ok(Self {
             config: cfg.clone(),
             client,
-            hostname,
             upstream_uri,
             origin,
         })
@@ -98,14 +93,14 @@ impl ProxyClient {
     pub async fn handle(
         &self,
         mut request: Request<Body>,
-        state: &AppStateInner,
+        state: &AppState,
     ) -> anyhow::Result<Response> {
         if request.uri().path() == PROXY_AUTHORIZE_ENDPOINT {
             return Ok(self.authorize(request, state).await?.into_response());
         }
 
         if let Some(cookie) = Cookies::extract_one(request.headers(), COOKIE_NAME) {
-            if let Err(err) = state.issuer.validate_token(cookie.value()) {
+            if let Err(err) = state.issuer().validate_token(cookie.value()) {
                 warn!("token validation failed: {}", err);
             } else {
                 let value: HeaderValue = format!("Bearer {}", cookie.value()).try_into()?;
@@ -122,7 +117,7 @@ impl ProxyClient {
     async fn authorize(
         &self,
         request: Request<Body>,
-        state: &AppStateInner,
+        state: &AppState,
     ) -> anyhow::Result<impl IntoResponse> {
         let query = Query::<UpstreamAuthorizeParams>::from_request(request, state).await?;
 
@@ -138,16 +133,14 @@ impl ProxyClient {
         ))
     }
 
-    async fn resolve_full_url<B>(&self, request: Request<B>, state: &AppStateInner) -> String {
+    async fn resolve_full_url<B>(&self, request: Request<B>, state: &AppState) -> String {
         let (mut parts, _) = request.into_parts();
         let host = Host::from_request_parts(&mut parts, state).await;
         let OriginalUri(uri) = OriginalUri::from_request_parts(&mut parts, state)
             .await
             .unwrap();
 
-        let scheme = uri
-            .scheme_str()
-            .unwrap_or(self.config.origin_url.scheme());
+        let scheme = uri.scheme_str().unwrap_or(self.config.origin_url.scheme());
 
         match (host, uri.path_and_query()) {
             (Ok(host), Some(path_and_query)) => {
@@ -161,16 +154,12 @@ impl ProxyClient {
         }
     }
 
-    async fn redirect_to_authorization<B>(
-        &self,
-        request: Request<B>,
-        state: &AppStateInner,
-    ) -> Response
+    async fn redirect_to_authorization<B>(&self, request: Request<B>, state: &AppState) -> Response
     where
         B: Send + 'static,
     {
         let full_uri = self.resolve_full_url(request, state).await;
-        let redirect_uri = UriBuilder::from_str(state.config.base_url.as_str())
+        let redirect_uri = UriBuilder::from_str(state.config().base_url.as_str())
             .unwrap()
             .append_path("/authorize")
             .append_params(AuthorizeParams {
