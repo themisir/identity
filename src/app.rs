@@ -44,7 +44,7 @@ impl AppState {
         let store = UserStore::new(pool);
 
         // token issuer
-        let issuer = Issuer::new(config.base_url.as_str());
+        let issuer = Issuer::new(config.base_url.clone());
 
         // upstream clients
         let upstreams = Upstreams::from_config(&mut config.upstreams)?;

@@ -17,6 +17,7 @@ use jsonwebtoken::jwk::{
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Validation};
 use openssl::rsa::Rsa;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
@@ -48,6 +49,7 @@ pub struct Issuer {
 struct DiscoverySpecs {
     issuer: String,
     authorization_endpoint: String,
+    revocation_endpoint: String,
     jwks_uri: String,
     id_token_signing_alg_values_supported: Vec<Algorithm>,
 }
@@ -55,7 +57,7 @@ struct DiscoverySpecs {
 type Result<T> = jsonwebtoken::errors::Result<T>;
 
 impl Issuer {
-    pub fn new(issuer: &str) -> Self {
+    pub fn new(issuer: Url) -> Self {
         let algorithm = Algorithm::RS256;
         let mut header = jsonwebtoken::Header::new(algorithm);
 
@@ -91,11 +93,14 @@ impl Issuer {
             }],
         };
 
+        let issuer = issuer.origin().ascii_serialization();
+
         let discovery = DiscoverySpecs {
-            issuer: issuer.into(),
+            issuer: issuer.clone(),
             authorization_endpoint: format!("{}/authorize", issuer),
+            revocation_endpoint: format!("{}/logout", issuer),
             jwks_uri: format!("{}/.well-known/jwks", issuer),
-            id_token_signing_alg_values_supported: vec![Algorithm::EdDSA],
+            id_token_signing_alg_values_supported: vec![Algorithm::RS256],
         };
 
         header.kid = Some(kid);
@@ -105,7 +110,7 @@ impl Issuer {
             encoding_key,
             decoding_key,
             validation,
-            issuer: issuer.into(),
+            issuer,
 
             jwk_set,
             discovery,
