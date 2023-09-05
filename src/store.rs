@@ -67,6 +67,7 @@ impl User {
     }
 }
 
+#[derive(Clone)]
 pub struct UserClaim {
     pub name: String,
     pub value: String,

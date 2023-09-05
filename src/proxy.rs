@@ -4,8 +4,10 @@ use crate::http::{Cookies, SetCookie};
 use crate::uri::UriBuilder;
 use crate::utils::Duration;
 
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
+use crate::store::UserClaim;
 use axum::extract::{FromRequestParts, OriginalUri};
 use axum::{
     extract::{FromRequest, Host, Query, State},
@@ -55,6 +57,7 @@ pub struct ProxyClient {
     client: hyper::Client<HttpsConnector<HttpConnector>>,
     upstream_uri: Uri,
     origin: String,
+    claims: HashSet<String>,
 }
 
 const COOKIE_NAME: &str = "_identity.im";
@@ -66,7 +69,7 @@ pub struct UpstreamAuthorizeParams {
 }
 
 impl ProxyClient {
-    pub fn new(cfg: &UpstreamConfig) -> anyhow::Result<Self> {
+    pub fn new(cfg: &mut UpstreamConfig) -> anyhow::Result<Self> {
         let https = HttpsConnector::new();
         let client = hyper::Client::builder().build::<_, Body>(https);
 
@@ -74,11 +77,30 @@ impl ProxyClient {
 
         let origin = cfg.origin_url.origin().ascii_serialization();
 
+        let claims = HashSet::from_iter(cfg.claims.clone());
+
+        if let Some(require_claims) = &cfg.require_claims {
+            if require_claims.is_empty() {
+                cfg.require_claims = None;
+            } else {
+                if !cfg.require_authentication {
+                    anyhow::bail!("Upstream '{}' required claims, but does not require authentication. Please set require_authentication to true on the upstream configuration", cfg.name);
+                }
+
+                for claim in require_claims {
+                    if !claims.contains(claim.as_str()) {
+                        anyhow::bail!("Required claim '{}' is not available for the upstream '{}'. Please add the claim to claims section of the upstream configuration", claim, cfg.name);
+                    }
+                }
+            }
+        }
+
         Ok(Self {
             config: cfg.clone(),
             client,
             upstream_uri,
             origin,
+            claims,
         })
     }
 
@@ -88,6 +110,32 @@ impl ProxyClient {
 
     pub fn origin(&self) -> &str {
         self.origin.as_str()
+    }
+
+    pub fn filter_claims(&self, claims: Vec<UserClaim>) -> Option<Vec<UserClaim>> {
+        if let Some(required_claims) = &self.config.require_claims {
+            let filtered_claims: HashMap<String, UserClaim> = claims
+                .into_iter()
+                .filter(|c| self.claims.contains(c.name.as_str()))
+                .map(|c| (c.name.clone(), c))
+                .collect();
+
+            for claim in required_claims {
+                if !filtered_claims.contains_key(claim.as_str()) {
+                    warn!("required claim '{}' is missing", claim);
+                    return None;
+                }
+            }
+
+            Some(filtered_claims.into_values().collect())
+        } else {
+            Some(
+                claims
+                    .into_iter()
+                    .filter(|c| self.claims.contains(&c.name))
+                    .collect(),
+            )
+        }
     }
 
     pub async fn handle(
@@ -111,7 +159,11 @@ impl ProxyClient {
             }
         }
 
-        Ok(self.redirect_to_authorization(request, state).await)
+        if self.config.require_authentication {
+            Ok(self.redirect_to_authorization(request, state).await)
+        } else {
+            self.forward(request).await
+        }
     }
 
     async fn authorize(

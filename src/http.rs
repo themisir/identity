@@ -8,9 +8,12 @@ use axum::{
         header::{COOKIE, SET_COOKIE},
         request, HeaderMap, HeaderValue, StatusCode,
     },
-    response::{IntoResponseParts, ResponseParts},
+    response::{IntoResponse, IntoResponseParts, Response, ResponseParts},
+    Json,
 };
 use cookie::Cookie;
+use log::error;
+use serde::Serialize;
 
 pub struct SetCookie<'c>(pub Cookie<'c>);
 
@@ -78,5 +81,35 @@ where
         _state: &S,
     ) -> Result<Self, Self::Rejection> {
         Ok(Self::from_headers(&parts.headers))
+    }
+}
+
+struct AppError(anyhow::Error);
+
+#[derive(Serialize)]
+struct ErrorDto {
+    message: String,
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        error!("caught error while processing response: {}", self.0);
+
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorDto {
+                message: format!("{}", self.0),
+            }),
+        )
+            .into_response()
+    }
+}
+
+impl<E> From<E> for AppError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        Self(err.into())
     }
 }

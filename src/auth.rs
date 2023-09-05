@@ -79,21 +79,19 @@ pub async fn authorize(
 
             Ok(Redirect::to(redirect_uri.as_str()))
         }
-        Some(user) => {
-            match state.upstreams().find_by_name(params.client_id.as_str()) {
-                None => Err(StatusCode::BAD_REQUEST),
-                Some(upstream) => {
-                    let claims = state
-                        .store()
-                        .get_user_claims(user.id)
-                        .await
-                        .map_err(|err| {
-                            error!("failed to get user {} claims: {}", user.id, err);
-                            StatusCode::INTERNAL_SERVER_ERROR
-                        })?;
+        Some(user) => match state.upstreams().find_by_name(params.client_id.as_str()) {
+            None => Err(StatusCode::BAD_REQUEST),
+            Some(upstream) => {
+                let claims = state
+                    .store()
+                    .get_user_claims(user.id)
+                    .await
+                    .map_err(|err| {
+                        error!("failed to get user {} claims: {}", user.id, err);
+                        StatusCode::INTERNAL_SERVER_ERROR
+                    })?;
 
-                    // todo: filter claims for client
-
+                if let Some(claims) = upstream.filter_claims(claims) {
                     let token = state
                         .issuer()
                         .create_token(
@@ -117,15 +115,28 @@ pub async fn authorize(
                         .to_string();
 
                     Ok(Redirect::to(upstream_authorize_uri.as_str()))
+                } else {
+                    Ok(Redirect::to(
+                        UriBuilder::new()
+                            .set_path("/unauthorized")
+                            .append_param("client_id", params.client_id)
+                            .to_string()
+                            .as_str(),
+                    ))
                 }
             }
-        }
+        },
     }
 }
 
 #[axum_macros::debug_handler]
 pub async fn show_login() -> impl IntoResponse {
     Html(include_str!("ui/login.html"))
+}
+
+#[axum_macros::debug_handler]
+pub async fn show_unauthorized() -> impl IntoResponse {
+    Html(include_str!("ui/unauthorized.html"))
 }
 
 #[axum_macros::debug_handler]

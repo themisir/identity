@@ -12,10 +12,10 @@ use sqlx::sqlite::SqlitePoolOptions;
 pub struct AppState(Arc<AppStateInner>);
 
 struct AppStateInner {
-    pub config: AppConfig,
-    pub store: UserStore,
-    pub upstreams: Upstreams,
-    pub issuer: Issuer,
+    config: AppConfig,
+    store: UserStore,
+    upstreams: Upstreams,
+    issuer: Issuer,
 }
 
 impl AppState {
@@ -35,7 +35,7 @@ impl AppState {
         &self.0.issuer
     }
 
-    pub async fn from_config(config: AppConfig) -> anyhow::Result<Self> {
+    pub async fn from_config(mut config: AppConfig) -> anyhow::Result<Self> {
         // create db pool and store
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
@@ -47,7 +47,7 @@ impl AppState {
         let issuer = Issuer::new(config.base_url.as_str());
 
         // upstream clients
-        let upstreams = Upstreams::from_config(config.upstreams.as_ref())?;
+        let upstreams = Upstreams::from_config(&mut config.upstreams)?;
 
         Ok(AppState(Arc::new(AppStateInner {
             config: config.clone(),
@@ -97,7 +97,7 @@ pub struct Upstreams {
 }
 
 impl Upstreams {
-    pub fn from_config(upstreams: &[UpstreamConfig]) -> anyhow::Result<Self> {
+    pub fn from_config(upstreams: &mut [UpstreamConfig]) -> anyhow::Result<Self> {
         let mut by_name = HashMap::new();
         let mut by_host = HashMap::new();
 

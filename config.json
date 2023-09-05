@@ -9,7 +9,7 @@
       "origin_url": "https://wc.rahim.li",
       "upstream_url": "https://wc.rahim.li",
 
-      "claims": ["core:id", "core:username", "postapic:id"],
+      "claims": ["postapic:id"],
 
       "require_authentication": true,
       "require_claims": ["postapic:id"]
@@ -20,10 +20,9 @@
       "origin_url": "https://blocks.themisir.com",
       "upstream_url": "https://blocks.themisir.com",
 
-      "claims": ["core:id", "core:username", "blocks:role"],
+      "claims": ["blocks:role"],
 
-      "require_authentication": false,
-      "require_claims": []
+      "require_authentication": true
     },
     {
       "name": "dotnet",
@@ -31,10 +30,9 @@
       "origin_url": "http://dotnet.local:3000",
       "upstream_url": "http://127.0.0.1:5243",
 
-      "claims": ["core:id", "core:username"],
+      "claims": [],
 
-      "require_authentication": true,
-      "require_claims": []
+      "require_authentication": true
     }
   ]
 }

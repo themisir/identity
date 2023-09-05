@@ -91,6 +91,7 @@ async fn start_server(app_state: AppState, app_config: &AppConfig) -> anyhow::Re
         .route("/login", post(auth::handle_login))
         .route("/logout", post(auth::logout))
         .route("/authorize", get(auth::authorize))
+        .route("/unauthorized", get(auth::show_unauthorized))
         .route(
             "/.well-known/openid-configuration",
             get(issuer::discovery_handler),
