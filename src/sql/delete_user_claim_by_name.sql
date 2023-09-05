@@ -1,0 +1,1 @@
+DELETE FROM user_claims WHERE user_id = ? AND claim_name = ?

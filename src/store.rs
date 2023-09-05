@@ -1,17 +1,33 @@
 use crate::app::AppConfig;
 
+use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 use chrono::{prelude::*, Duration};
 use futures::TryStreamExt;
 use rand::{distributions, Rng};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-#[derive(Deserialize, Debug, Copy, Clone)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq)]
 pub enum UserRole {
     User,
     Admin,
+}
+
+impl UserRole {
+    pub fn as_static_str(&self) -> &'static str {
+        match self {
+            UserRole::User => "user",
+            UserRole::Admin => "admin",
+        }
+    }
+}
+
+impl Display for UserRole {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_static_str())
+    }
 }
 
 impl FromStr for UserRole {
@@ -20,13 +36,13 @@ impl FromStr for UserRole {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "admin" => Ok(UserRole::Admin),
-            "user" => Ok(UserRole::User),
+            "user" | "default" => Ok(UserRole::User),
             _ => anyhow::bail!("invalid role name: {}", s),
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct User {
     pub id: i32,
     pub username: String,
@@ -173,10 +189,7 @@ impl UserStore {
         let password_hash = User::create_hash(password.as_bytes())
             .map_err(|err| anyhow::format_err!("failed to create hash: {}", err))?;
         let (username, normalized_username) = Self::normalize_username(username);
-        let role_name = match role {
-            UserRole::User => "default",
-            UserRole::Admin => "admin",
-        };
+        let role_name = role.as_static_str();
 
         #[derive(sqlx::FromRow)]
         struct Row {
@@ -275,5 +288,66 @@ impl UserStore {
         } else {
             anyhow::bail!("unable to create user session: no rows affected")
         }
+    }
+
+    pub async fn get_all_users(&self) -> anyhow::Result<Vec<User>> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: i32,
+            username: String,
+            password_hash: String,
+            role_name: String,
+        }
+
+        let mut stream =
+            sqlx::query_as::<_, Row>(include_str!("sql/get_all_users.sql")).fetch(self.get_pool());
+
+        let mut users = Vec::new();
+
+        while let Some(row) = stream.try_next().await? {
+            users.push(User {
+                id: row.id,
+                username: row.username,
+                password_hash: row.password_hash,
+                role: UserRole::from_str(&row.role_name).unwrap_or(UserRole::User),
+            })
+        }
+
+        Ok(users)
+    }
+
+    pub async fn add_user_claim(&self, user_id: i32, claim: UserClaim) -> anyhow::Result<bool> {
+        let result = sqlx::query(include_str!("sql/add_user_claim.sql"))
+            .bind(user_id)
+            .bind(claim.name)
+            .bind(claim.value)
+            .execute(self.get_pool())
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn delete_user_claim_by_name(
+        &self,
+        user_id: i32,
+        claim_name: &str,
+    ) -> anyhow::Result<bool> {
+        let result = sqlx::query(include_str!("sql/delete_user_claim_by_name.sql"))
+            .bind(user_id)
+            .bind(claim_name)
+            .execute(self.get_pool())
+            .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn update_user_role(&self, user_id: i32, role: UserRole) -> anyhow::Result<bool> {
+        let result = sqlx::query(include_str!("sql/update_user_role.sql"))
+            .bind(role.as_static_str())
+            .bind(user_id)
+            .execute(self.get_pool())
+            .await?;
+
+        Ok(result.rows_affected() > 0)
     }
 }

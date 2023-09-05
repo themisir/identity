@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>{% block title %}Identity{% endblock %}</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/water.css@2/out/water.css"/>
+    <style>
+        td.actions a:not(:last-child) {
+            margin-right: 5px;
+        }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body>
+{% block content %}<p>Placeholder content</p>{% endblock %}
+
+<script>
+    function submitForm(action, values) {
+        const form = document.body.appendChild(document.createElement('form'));
+        form.action = action;
+        form.method = 'post';
+        for (const key in values) {
+            form.appendChild(createHiddenInput(key, values[key]));
+        }
+        form.submit();
+    }
+
+    function createHiddenInput(name, value) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value;
+        return input;
+    }
+
+    function checkInput(input) {
+        if ('checkValidity' in input && !input.checkValidity()) {
+            return false;
+        }
+
+        return true;
+    }
+
+    document.querySelectorAll('[data-submit]').forEach(function (el) {
+        const inputPrefix = 'data-input-';
+        const valuePrefix = 'data-value-';
+
+        const action = el.getAttribute('data-submit');
+        const inputs = [];
+        const values = {};
+
+        for (const attrName of el.getAttributeNames()) {
+            if (attrName.startsWith(inputPrefix)) {
+                const key = attrName.substring(inputPrefix.length);
+                const selector = el.getAttribute(attrName);
+                const input = document.querySelector(selector);
+                if (!input) {
+                    throw Error(`Invalid input selector for field '${key}': ${selector}`);
+                }
+                inputs.push([key, input]);
+                continue;
+            }
+
+            if (attrName.startsWith(valuePrefix)) {
+                const key = attrName.substring(inputPrefix.length);
+                values[key] = el.getAttribute(attrName);
+            }
+        }
+
+        el.addEventListener('click', function (ev) {
+            ev.preventDefault();
+
+            const body = {...values};
+
+            for (const [key, input] of inputs) {
+                if (!checkInput(input)) {
+                    return;
+                }
+
+                body[key] = input.value;
+            }
+
+            const confirmMsg = el.getAttribute('data-submit-confirm');
+            if (confirmMsg && !confirm(confirmMsg)) {
+                return;
+            }
+
+            submitForm(action, body);
+        });
+    });
+</script>
+
+</body>
+</html>

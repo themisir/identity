@@ -1,0 +1,1 @@
+UPDATE users SET role_name = ? WHERE id = ?

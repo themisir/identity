@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Claims{% endblock %}
+
+{% block content %}
+<h1>User claims</h1>
+
+<table>
+    <thead>
+    <tr>
+        <th>Name</th>
+        <th>Value</th>
+        <th>Actions</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for claim in claims %}
+    <tr>
+        <td>{{ claim.name|e }}</td>
+        <td>{{ claim.value|e }}</td>
+        <td class="actions">
+            <a data-submit="/admin/users/{{ user_id|e }}/claims/delete"
+               data-submit-confirm="Are you sure?"
+               data-value-claim_name="{{ claim.name|e }}"
+               href="#">Delete</a>
+        </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+    <tr>
+        <td>
+            <label>
+                <input name="claim_name" placeholder="core:example"/>
+            </label>
+        </td>
+        <td>
+            <label>
+                <input name="claim_value" placeholder="value..."/>
+            </label>
+        </td>
+        <td>
+            <button data-submit="/admin/users/{{ user_id|e }}/claims/add"
+                    data-input-claim_name="[name='claim_name']"
+                    data-input-claim_value="[name='claim_value']">
+                Add
+            </button>
+        </td>
+    </tr>
+    </tfoot>
+</table>
+
+{% endblock %}

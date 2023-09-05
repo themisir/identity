@@ -84,7 +84,7 @@ where
     }
 }
 
-struct AppError(anyhow::Error);
+pub struct AppError(anyhow::Error);
 
 #[derive(Serialize)]
 struct ErrorDto {

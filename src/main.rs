@@ -13,6 +13,7 @@ use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+mod admin;
 mod app;
 mod auth;
 mod http;
@@ -97,6 +98,7 @@ async fn start_server(app_state: AppState, app_config: &AppConfig) -> anyhow::Re
             get(issuer::discovery_handler),
         )
         .route("/.well-known/jwks", get(issuer::jwk_handler))
+        .nest("/admin", admin::create_router())
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
             proxy::middleware,

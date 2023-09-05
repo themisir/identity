@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX idx_user_claims_unique ON user_claims (user_id, claim_name);
