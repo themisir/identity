@@ -17,10 +17,8 @@ builder.Services.AddAuthentication(options =>
         options.RequireHttpsMetadata = false;
         options.TokenValidationParameters = new TokenValidationParameters
         {
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
-            ValidAudience = builder.Configuration["Jwt:Audience"],
             ValidateIssuer = true,
-            ValidateAudience = false,
+            ValidateAudience = true,
         };
     });
 
@@ -30,11 +28,18 @@ app.UseHttpLogging();
 
 app.UseRouting();
 
-app.UseAuthorization();
 app.UseAuthentication();
+app.UseAuthorization();
 
 app.MapGet("/unauthorized", static () => Results.Ok("ok"));
-app.MapGet("/", static (HttpContext context) => Results.Json(new { claims = context.User.Claims }))
+app.MapGet("/", static (HttpContext context) => Results.Json(new
+    {
+        claims = context.User.Claims.Select(c => new
+        {
+            name = c.Type,
+            value = c.Value
+        })
+    }))
     .RequireAuthorization();
 
 app.Run();
