@@ -41,7 +41,7 @@ pub async fn logout(Query(redirect): Query<RedirectParams>) -> impl IntoResponse
     let redirect_to = redirect.redirect_to.unwrap_or("/".to_string());
 
     (
-        AuthParams::clear_cookie(),
+        Authorize::clear_cookie(),
         Redirect::to(redirect_to.as_str()),
     )
 }
@@ -56,7 +56,7 @@ pub struct AuthorizeParams {
 pub async fn authorize(
     State(state): State<AppState>,
     Query(params): Query<AuthorizeParams>,
-    auth: AuthParams,
+    auth: Authorize,
 ) -> Result<Redirect, StatusCode> {
     let user = auth.find_user(state.store()).await.unwrap_or_else(|err| {
         error!("failed to find user: {}", err);
@@ -178,7 +178,7 @@ pub async fn handle_login(
             let redirect_to = params.redirect_to.unwrap_or("/".to_string());
 
             return Ok((
-                AuthParams::new(session_token).set_cookie(Some(Duration::days(30))),
+                Authorize::new(session_token).set_cookie(Some(Duration::days(30))),
                 Redirect::to(redirect_to.as_str()),
             ));
         }
@@ -193,17 +193,17 @@ pub async fn handle_login(
     }
 
     Ok((
-        AuthParams::clear_cookie(),
+        Authorize::clear_cookie(),
         Redirect::to(login_uri.to_string().as_str()),
     ))
 }
 
 #[derive(Default, Clone)]
-pub struct AuthParams {
+pub struct Authorize {
     pub session_token: Option<String>,
 }
 
-impl AuthParams {
+impl Authorize {
     pub fn new(session_token: String) -> Self {
         Self {
             session_token: Some(session_token),
@@ -227,7 +227,7 @@ impl AuthParams {
     }
 
     pub fn clear_cookie<'c>() -> SetCookie<'c> {
-        AuthParams::default().set_cookie(Some(Duration::seconds(1))) // short ttl, removes cookie
+        Authorize::default().set_cookie(Some(Duration::seconds(1))) // short ttl, removes cookie
     }
 
     pub async fn find_user(&self, store: &UserStore) -> anyhow::Result<Option<User>> {
@@ -242,7 +242,7 @@ impl AuthParams {
 }
 
 #[async_trait]
-impl FromRequestParts<AppState> for AuthParams {
+impl FromRequestParts<AppState> for Authorize {
     type Rejection = Infallible;
 
     async fn from_request_parts(
@@ -251,11 +251,11 @@ impl FromRequestParts<AppState> for AuthParams {
     ) -> Result<Self, Self::Rejection> {
         let params = Cookies::from_headers(&parts.headers)
             .get(COOKIE_NAME)
-            .map(|cookie| AuthParams::new(cookie.value().into()))
+            .map(|cookie| Authorize::new(cookie.value().into()))
             .or_else(|| {
                 get_header(&parts.headers, AUTHORIZATION).and_then(|auth_header| {
                     if auth_header.len() > 7 && auth_header.starts_with("Bearer ") {
-                        Some(AuthParams::new(auth_header[7..].into()))
+                        Some(Authorize::new(auth_header[7..].into()))
                     } else {
                         None
                     }

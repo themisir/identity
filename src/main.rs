@@ -98,7 +98,7 @@ async fn start_server(app_state: AppState, app_config: &AppConfig) -> anyhow::Re
             get(issuer::discovery_handler),
         )
         .route("/.well-known/jwks", get(issuer::jwk_handler))
-        .nest("/admin", admin::create_router())
+        .nest("/admin", admin::create_router(app_state.clone()))
         .layer(middleware::from_fn_with_state(
             app_state.clone(),
             proxy::middleware,

@@ -1,17 +1,22 @@
 use crate::app::AppState;
+use crate::auth::Authorize;
 use crate::http::AppError;
 use crate::store::{User, UserClaim, UserRole};
 
 use askama::Template;
 use axum::{
     extract::{Form, Path, State},
-    response::{Html, IntoResponse, Redirect},
+    http::{Request, StatusCode},
+    middleware,
+    middleware::Next,
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
     Router,
 };
+use hyper::Body;
 use serde::Deserialize;
 
-pub fn create_router() -> Router<AppState> {
+pub fn create_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/users", get(get_users_page))
         .route("/users/add", get(add_user_add_page))
@@ -23,6 +28,25 @@ pub fn create_router() -> Router<AppState> {
             post(delete_user_claim_handler),
         )
         .route("/users/:user_id/claims/add", post(add_user_claim_handler))
+        .layer(middleware::from_fn_with_state(state, authorize))
+}
+
+async fn authorize(
+    State(state): State<AppState>,
+    auth: Authorize,
+    request: Request<Body>,
+    next: Next<Body>,
+) -> Result<Response, AppError> {
+    Ok(match auth.find_user(state.store()).await? {
+        None => StatusCode::UNAUTHORIZED.into_response(),
+        Some(user) => {
+            if user.role == UserRole::Admin {
+                next.run(request).await
+            } else {
+                StatusCode::FORBIDDEN.into_response()
+            }
+        }
+    })
 }
 
 #[derive(Template)]
