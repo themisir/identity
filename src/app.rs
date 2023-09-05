@@ -1,12 +1,12 @@
-use std::{collections::HashMap, net::SocketAddr, path::Path, sync::Arc};
-
 use crate::issuer::Issuer;
 use crate::proxy::ProxyClient;
 use crate::store::UserStore;
 
-use anyhow::anyhow;
+use std::{collections::HashMap, net::SocketAddr, path::Path, str::FromStr, sync::Arc};
+
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePoolOptions;
+use url::Url;
 
 #[derive(Clone)]
 pub struct AppState(Arc<AppStateInner>);
@@ -61,8 +61,8 @@ impl AppState {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub bind: SocketAddr,
-    pub base_url: String,
-    pub users_db: String,
+    pub base_url: Url,
+    pub users_db: Url,
     pub upstreams: Vec<UpstreamConfig>,
 }
 
@@ -72,7 +72,7 @@ impl AppConfig {
         let mut config: AppConfig = serde_json::from_str(contents.as_str())?;
 
         // remove trailing slash
-        config.base_url = config.base_url.trim_end_matches('/').into();
+        config.base_url = Url::from_str(config.base_url.as_str().trim_end_matches('/')).unwrap();
 
         Ok(config)
     }
@@ -83,8 +83,8 @@ pub struct UpstreamConfig {
     pub name: String,
     pub claims: Vec<String>,
 
-    pub upstream_url: url::Url,
-    pub origin_url: url::Url,
+    pub upstream_url: Url,
+    pub origin_url: Url,
 
     // authorization rules
     pub require_claims: Option<Vec<String>>,
@@ -106,16 +106,16 @@ impl Upstreams {
             let host = cfg.origin_url.authority();
 
             if by_name.insert(cfg.name.clone(), client.clone()).is_some() {
-                return Err(anyhow!(
+                anyhow::bail!(
                     "upstream with the name {} declared more than once",
                     cfg.name
-                ));
+                );
             }
             if by_host.insert(host.into(), client).is_some() {
-                return Err(anyhow!(
+                anyhow::bail!(
                     "upstream with the hostname {} declared more than once",
                     host
-                ));
+                );
             }
         }
 

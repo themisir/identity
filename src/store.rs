@@ -1,11 +1,12 @@
 use crate::app::AppConfig;
-use anyhow::anyhow;
+
+use std::str::FromStr;
+
 use chrono::{prelude::*, Duration};
 use futures::TryStreamExt;
 use rand::{distributions, Rng};
 use serde::Deserialize;
 use sqlx::SqlitePool;
-use std::str::FromStr;
 
 #[derive(Deserialize, Debug, Copy, Clone)]
 pub enum UserRole {
@@ -20,7 +21,7 @@ impl FromStr for UserRole {
         match s {
             "admin" => Ok(UserRole::Admin),
             "user" => Ok(UserRole::User),
-            _ => Err(anyhow!("invalid role name: {}", s)),
+            _ => anyhow::bail!("invalid role name: {}", s),
         }
     }
 }
@@ -80,12 +81,8 @@ mod embedded {
 
 pub async fn migrate(config: &AppConfig) -> anyhow::Result<()> {
     use refinery::config::*;
-    use url::Url;
 
-    let url = Url::parse(config.users_db.as_str())
-        .map_err(|_| anyhow!("unable to parse database URL: {}", config.users_db.clone()))?;
-
-    let db_path = url.as_str()[url.scheme().len()..]
+    let db_path = config.users_db.as_str()[config.users_db.scheme().len()..]
         .trim_start_matches(':')
         .trim_start_matches("//")
         .to_string();
@@ -174,7 +171,7 @@ impl UserStore {
         role: UserRole,
     ) -> anyhow::Result<User> {
         let password_hash = User::create_hash(password.as_bytes())
-            .map_err(|err| anyhow!("failed to create hash: {}", err))?;
+            .map_err(|err| anyhow::format_err!("failed to create hash: {}", err))?;
         let (username, normalized_username) = Self::normalize_username(username);
         let role_name = match role {
             UserRole::User => "default",
@@ -229,16 +226,16 @@ impl UserStore {
             None => Ok(None),
             Some(row) => {
                 if match (issuer, &row.issuer) {
-                    (None, _) => false, // issuer check is not needed
+                    (None, _) => false,               // issuer check is not needed
                     (Some(i1), Some(i2)) => i2 != i1, // check issuer
                     (Some(..), None) => true, // issuer check needed, but not set for the token
                 } {
-                    return Err(anyhow!("invalid issuer"));
+                    anyhow::bail!("invalid issuer");
                 }
 
                 if let Some(expires_at) = row.expires_at {
                     if Utc::now() > expires_at {
-                        return Err(anyhow!("expired session"))
+                        anyhow::bail!("expired session")
                     }
                 }
 
@@ -276,7 +273,7 @@ impl UserStore {
         if result.rows_affected() == 1 {
             Ok(session_id)
         } else {
-            Err(anyhow!("unable to create user session: no rows affected"))
+            anyhow::bail!("unable to create user session: no rows affected")
         }
     }
 }

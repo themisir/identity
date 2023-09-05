@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
-use std::fmt::{Display, Formatter, Write};
+use std::{
+    fmt::{Display, Formatter, Write},
+    str::FromStr,
+};
 
 use hyper::Uri;
 use serde::Serialize;
@@ -19,6 +22,14 @@ impl Display for UriBuilder {
         }
 
         self.write_path_and_query(f)
+    }
+}
+
+impl FromStr for UriBuilder {
+    type Err = url::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_url(&url::Url::parse(s)?))
     }
 }
 
@@ -47,21 +58,19 @@ impl UriBuilder {
         }
     }
 
-    pub fn from_str(uri: &str) -> Result<Self, url::ParseError> {
-        let uri = url::Url::parse(uri)?;
-
-        Ok(Self {
+    pub fn from_url(url: &url::Url) -> Self {
+        Self {
             origin: {
-                let origin = uri.origin();
+                let origin = url.origin();
                 if origin.is_tuple() {
                     Some(origin.ascii_serialization())
                 } else {
                     None
                 }
             },
-            path: Some(uri.path().into()),
-            query: uri.query().map(String::from),
-        })
+            path: Some(url.path().into()),
+            query: url.query().map(String::from),
+        }
     }
 
     pub fn set_origin<V>(mut self, origin: V) -> Self

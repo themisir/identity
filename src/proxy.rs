@@ -8,9 +8,8 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 use crate::store::UserClaim;
-use axum::extract::{FromRequestParts, OriginalUri};
 use axum::{
-    extract::{FromRequest, Host, Query, State},
+    extract::{FromRequest, FromRequestParts, Host, OriginalUri, Query, State},
     http::{
         header::{HeaderValue, AUTHORIZATION},
         Request, StatusCode, Uri,
@@ -211,8 +210,7 @@ impl ProxyClient {
         B: Send + 'static,
     {
         let full_uri = self.resolve_full_url(request, state).await;
-        let redirect_uri = UriBuilder::from_str(state.config().base_url.as_str())
-            .unwrap()
+        let redirect_uri = UriBuilder::from_url(&state.config().base_url)
             .append_path("/authorize")
             .append_params(AuthorizeParams {
                 client_id: self.config.name.to_string(),

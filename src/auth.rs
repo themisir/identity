@@ -184,8 +184,7 @@ pub async fn handle_login(
         }
     }
 
-    let mut login_uri = UriBuilder::from_str(state.config().base_url.as_str())
-        .unwrap()
+    let mut login_uri = UriBuilder::from_url(&state.config().base_url)
         .set_path("/login")
         .append_param("error", "invalid_password");
 
