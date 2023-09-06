@@ -23,6 +23,7 @@ EOF
 
 FROM debian:bullseye-slim AS final
 
+WORKDIR /app
 
 ARG UID=10001
 RUN adduser \
