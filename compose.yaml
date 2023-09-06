@@ -1,0 +1,13 @@
+
+services:
+  server:
+    build:
+      context: .
+      target: final
+    volumes:
+      - /bin/users.db:db-data
+    ports:
+      - 80:80
+
+volumes:
+  db-data:
