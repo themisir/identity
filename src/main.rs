@@ -9,6 +9,7 @@ use axum::{
 };
 use clap::{Args, Parser, Subcommand};
 use log::info;
+use std::net::SocketAddr;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -26,30 +27,37 @@ mod utils;
 /// Identity and user management proxy
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
-pub struct AppArgs {
+struct AppArgs {
     #[command(subcommand)]
-    pub command: Commands,
+    command: Commands,
 
     /// Config file path
     #[arg(short, long, default_value = "./config.json")]
-    pub config_file: String,
+    config_file: String,
 
     /// Disable automatic migration
     #[arg(short, long, default_value = "false")]
-    pub no_migration: bool,
+    no_migration: bool,
 }
 
 #[derive(Subcommand, Debug, Clone)]
-pub enum Commands {
+enum Commands {
     /// Start server
-    Listen,
+    Listen(ListenArgs),
 
     /// Add a new user
     AddUser(AddUserArgs),
 }
 
 #[derive(Args, Debug, Clone)]
-pub struct AddUserArgs {
+struct ListenArgs {
+    /// Bind address
+    #[arg(long, default_value = "0.0.0.0:3000")]
+    pub bind: SocketAddr,
+}
+
+#[derive(Args, Debug, Clone)]
+struct AddUserArgs {
     #[arg(long)]
     pub username: String,
 
@@ -78,15 +86,15 @@ async fn main() -> anyhow::Result<()> {
         store::migrate(&app_config).await?;
     }
 
-    let app_state = AppState::from_config(app_config.clone()).await?;
+    let app_state = AppState::from_config(app_config).await?;
 
     match app_args.command {
-        Commands::Listen => start_server(app_state, &app_config).await,
+        Commands::Listen(args) => start_server(app_state, &args).await,
         Commands::AddUser(args) => add_user(app_state, &args).await,
     }
 }
 
-async fn start_server(app_state: AppState, app_config: &AppConfig) -> anyhow::Result<()> {
+async fn start_server(app_state: AppState, args: &ListenArgs) -> anyhow::Result<()> {
     let routes = Router::new()
         .route("/login", get(auth::show_login))
         .route("/login", post(auth::handle_login))
@@ -106,9 +114,9 @@ async fn start_server(app_state: AppState, app_config: &AppConfig) -> anyhow::Re
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
 
-    info!("Binding on {}", app_config.bind);
+    println!("Binding on {}", args.bind);
 
-    axum::Server::bind(&app_config.bind)
+    axum::Server::bind(&args.bind)
         .serve(routes.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
         .await?;

@@ -2,7 +2,7 @@ use crate::issuer::Issuer;
 use crate::proxy::ProxyClient;
 use crate::store::UserStore;
 
-use std::{collections::HashMap, net::SocketAddr, path::Path, str::FromStr, sync::Arc};
+use std::{collections::HashMap, path::Path, str::FromStr, sync::Arc};
 
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePoolOptions;
@@ -60,7 +60,6 @@ impl AppState {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
-    pub bind: SocketAddr,
     pub base_url: Url,
     pub users_db: Url,
     pub upstreams: Vec<UpstreamConfig>,

@@ -131,12 +131,12 @@ pub async fn authorize(
 
 #[axum_macros::debug_handler]
 pub async fn show_login() -> impl IntoResponse {
-    Html(include_str!("ui/login.html"))
+    Html(include_str!("templates/login.html"))
 }
 
 #[axum_macros::debug_handler]
 pub async fn show_unauthorized() -> impl IntoResponse {
-    Html(include_str!("ui/unauthorized.html"))
+    Html(include_str!("templates/unauthorized.html"))
 }
 
 #[axum_macros::debug_handler]
