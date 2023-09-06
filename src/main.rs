@@ -1,15 +1,18 @@
 #![feature(file_create_new)]
 #![feature(iter_collect_into)]
 
+use std::net::SocketAddr;
+
 use app::{AppConfig, AppState};
 use axum::{
+    extract::State,
     middleware,
+    response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
     Router,
 };
 use clap::{Args, Parser, Subcommand};
 use log::info;
-use std::net::SocketAddr;
 use tokio::signal;
 use tower_http::trace::TraceLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -94,8 +97,9 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
-async fn start_server(app_state: AppState, args: &ListenArgs) -> anyhow::Result<()> {
-    let routes = Router::new()
+async fn start_server(state: AppState, args: &ListenArgs) -> anyhow::Result<()> {
+    let router = Router::new()
+        .route("/", get(index_handler))
         .route("/login", get(auth::show_login))
         .route("/login", post(auth::handle_login))
         .route("/logout", post(auth::logout))
@@ -106,22 +110,32 @@ async fn start_server(app_state: AppState, args: &ListenArgs) -> anyhow::Result<
             get(issuer::discovery_handler),
         )
         .route("/.well-known/jwks", get(issuer::jwk_handler))
-        .nest("/admin", admin::create_router(app_state.clone()))
+        .nest("/admin", admin::create_router(state.clone()))
+        .nest("/setup", admin::create_setup_router(state.clone()))
         .layer(middleware::from_fn_with_state(
-            app_state.clone(),
+            state.clone(),
             proxy::middleware,
         ))
         .layer(TraceLayer::new_for_http())
-        .with_state(app_state);
+        .with_state(state);
 
     println!("Binding on {}", args.bind);
 
     axum::Server::bind(&args.bind)
-        .serve(routes.into_make_service())
+        .serve(router.into_make_service())
         .with_graceful_shutdown(shutdown_signal())
         .await?;
 
     Ok(())
+}
+
+#[axum_macros::debug_handler]
+async fn index_handler(State(state): State<AppState>) -> Result<Response, http::AppError> {
+    if state.store().has_any_user().await? {
+        Ok(Html(include_str!("templates/home.html")).into_response())
+    } else {
+        Ok(Redirect::to("/setup").into_response())
+    }
 }
 
 async fn add_user(app_state: AppState, args: &AddUserArgs) -> anyhow::Result<()> {

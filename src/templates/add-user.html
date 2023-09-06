@@ -7,28 +7,26 @@
 
 <form method="post">
     <div>
-        <label>
-            Username:
-            <input name="username"/>
-        </label>
+        <label for="username">Username:</label>
+        <input id="username" name="username"  />
     </div>
 
     <div>
-        <label>
-            Password:
-            <input name="password"/>
-        </label>
+        <label for="password">Password:</label>
+        <input id="password" name="password" type="password"  />
     </div>
 
+    {% if let Some(role) = role %}
+    <input type="hidden" name="role" value="{{ role|e }}"/>
+    {% else %}
     <div>
-        <label>
-            Role:
-            <select name="role">
-                <option value="User" selected>User</option>
-                <option value="Admin">Admin</option>
-            </select>
-        </label>
+        <label for="role">Role:</label>
+        <select id="role" name="role">
+            <option value="User" selected>User</option>
+            <option value="Admin">Admin</option>
+        </select>
     </div>
+    {% endif %}
 
     <button type="submit">Submit</button>
 </form>

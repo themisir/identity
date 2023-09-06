@@ -4,7 +4,7 @@ CREATE TABLE users
     username            TEXT      NOT NULL,
     username_normalized TEXT      NOT NULL,
     password_hash       TEXT      NOT NULL,
-    role_name           TEXT      NOT NULL DEFAULT 'user',
+    role_name           TEXT      NOT NULL DEFAULT 'User',
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

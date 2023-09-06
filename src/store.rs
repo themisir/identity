@@ -15,11 +15,14 @@ pub enum UserRole {
     Admin,
 }
 
+const ROLE_USER: &str = "User";
+const ROLE_ADMIN: &str = "Admin";
+
 impl UserRole {
     pub fn as_static_str(&self) -> &'static str {
         match self {
-            UserRole::User => "user",
-            UserRole::Admin => "admin",
+            UserRole::User => ROLE_USER,
+            UserRole::Admin => ROLE_ADMIN,
         }
     }
 }
@@ -35,8 +38,8 @@ impl FromStr for UserRole {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "admin" => Ok(UserRole::Admin),
-            "user" | "default" => Ok(UserRole::User),
+            ROLE_ADMIN => Ok(UserRole::Admin),
+            ROLE_USER | "default" => Ok(UserRole::User),
             _ => anyhow::bail!("invalid role name: {}", s),
         }
     }
@@ -131,6 +134,14 @@ impl UserStore {
 
     fn get_pool(&self) -> &SqlitePool {
         &self.pool
+    }
+
+    pub async fn has_any_user(&self) -> anyhow::Result<bool> {
+        let row = sqlx::query("SELECT 1 FROM users")
+            .fetch_optional(self.get_pool())
+            .await?;
+
+        Ok(row.is_some())
     }
 
     pub async fn find_user_by_username(&self, username: &str) -> anyhow::Result<Option<User>> {

@@ -1,5 +1,5 @@
 use crate::app::AppState;
-use crate::auth::Authorize;
+use crate::auth::{Authorize, CORE_ISSUER};
 use crate::http::AppError;
 use crate::store::{User, UserClaim, UserRole};
 
@@ -13,13 +13,14 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use chrono::Duration;
 use hyper::Body;
 use serde::Deserialize;
 
 pub fn create_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/users", get(get_users_page))
-        .route("/users/add", get(add_user_add_page))
+        .route("/users/add", get(add_user_page))
         .route("/users/add", post(add_user_handler))
         .route("/users/:user_id/update", post(update_user_handler))
         .route("/users/:user_id/claims", get(get_user_claims_page))
@@ -29,6 +30,25 @@ pub fn create_router(state: AppState) -> Router<AppState> {
         )
         .route("/users/:user_id/claims/add", post(add_user_claim_handler))
         .layer(middleware::from_fn_with_state(state, authorize))
+}
+
+pub fn create_setup_router(state: AppState) -> Router<AppState> {
+    Router::new()
+        .route("/", get(add_first_user_page))
+        .route("/", post(add_first_user_handler))
+        .layer(middleware::from_fn_with_state(state, authorize_setup))
+}
+
+async fn authorize_setup(
+    State(state): State<AppState>,
+    request: Request<Body>,
+    next: Next<Body>,
+) -> Result<Response, AppError> {
+    Ok(if state.store().has_any_user().await? {
+        StatusCode::FORBIDDEN.into_response()
+    } else {
+        next.run(request).await
+    })
 }
 
 async fn authorize(
@@ -65,11 +85,23 @@ async fn get_users_page(State(state): State<AppState>) -> Result<impl IntoRespon
 
 #[derive(Template)]
 #[template(path = "add-user.html")]
-struct AddUserTemplate {}
+struct AddUserTemplate {
+    role: Option<UserRole>,
+}
 
 #[axum_macros::debug_handler]
-async fn add_user_add_page() -> Result<impl IntoResponse, AppError> {
-    let body = AddUserTemplate {}.render()?;
+async fn add_first_user_page() -> Result<impl IntoResponse, AppError> {
+    let body = AddUserTemplate {
+        role: Some(UserRole::Admin),
+    }
+    .render()?;
+
+    Ok(Html(body))
+}
+
+#[axum_macros::debug_handler]
+async fn add_user_page() -> Result<impl IntoResponse, AppError> {
+    let body = AddUserTemplate { role: None }.render()?;
 
     Ok(Html(body))
 }
@@ -94,6 +126,28 @@ async fn add_user_handler(
     // TODO: generate a password change session
 
     Ok(Redirect::to("/admin/users"))
+}
+
+#[axum_macros::debug_handler]
+async fn add_first_user_handler(
+    State(state): State<AppState>,
+    Form(form): Form<AddUserDto>,
+) -> Result<impl IntoResponse, AppError> {
+    let user = state
+        .store()
+        .create_user(&form.username, &form.password, UserRole::Admin)
+        .await?;
+
+    let ttl = Some(Duration::days(15));
+    let session_token = state
+        .store()
+        .create_user_session(user.id, CORE_ISSUER, ttl)
+        .await?;
+
+    Ok((
+        Authorize::new(session_token).set_cookie(ttl),
+        Redirect::to("/admin/users"),
+    ))
 }
 
 #[derive(Deserialize)]

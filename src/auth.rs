@@ -22,8 +22,9 @@ use cookie::{Cookie, SameSite};
 use log::error;
 use serde::{Deserialize, Serialize};
 
+pub const CORE_ISSUER: &str = "core";
+
 const COOKIE_NAME: &str = "_im";
-const CORE_ISSUER: &str = "core";
 
 #[derive(Deserialize, Debug)]
 pub struct LoginRequestBody {
