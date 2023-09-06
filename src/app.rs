@@ -88,6 +88,8 @@ pub struct UpstreamConfig {
     // authorization rules
     pub require_claims: Option<Vec<String>>,
     pub require_authentication: bool,
+
+    pub headers: Option<HashMap<String, String>>,
 }
 
 pub struct Upstreams {

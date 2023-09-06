@@ -1,17 +1,17 @@
 use crate::app::{AppState, UpstreamConfig};
 use crate::auth::AuthorizeParams;
 use crate::http::{Cookies, SetCookie};
+use crate::store::UserClaim;
 use crate::uri::UriBuilder;
 use crate::utils::Duration;
 
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
-use crate::store::UserClaim;
 use axum::{
     extract::{FromRequest, FromRequestParts, Host, OriginalUri, Query, State},
     http::{
-        header::{HeaderValue, AUTHORIZATION},
+        header::{HeaderName, HeaderValue, AUTHORIZATION},
         Request, StatusCode, Uri,
     },
     middleware::Next,
@@ -57,6 +57,7 @@ pub struct ProxyClient {
     upstream_uri: Uri,
     origin: String,
     claims: HashSet<String>,
+    modified_headers: Option<Vec<(HeaderName, HeaderValue)>>,
 }
 
 const COOKIE_NAME: &str = "_identity.im";
@@ -94,12 +95,41 @@ impl ProxyClient {
             }
         }
 
+        let modified_headers = match &cfg.headers {
+            None => None,
+            Some(headers) => {
+                let mut parsed = Vec::new();
+                for (k, v) in headers {
+                    let name = HeaderName::from_str(k.as_str()).map_err(|err| {
+                        anyhow::format_err!(
+                            "invalid header name '{}' for modified headers of upstream '{}': {}",
+                            k,
+                            cfg.name,
+                            err
+                        )
+                    })?;
+                    let value = HeaderValue::from_str(v.as_str()).map_err(|err| {
+                        anyhow::format_err!(
+                            "failed to parse modified header '{}' value for upstream '{}': {}",
+                            k,
+                            cfg.name,
+                            err
+                        )
+                    })?;
+
+                    parsed.push((name, value));
+                }
+                Some(parsed)
+            }
+        };
+
         Ok(Self {
             config: cfg.clone(),
             client,
             upstream_uri,
             origin,
             claims,
+            modified_headers,
         })
     }
 
@@ -225,6 +255,13 @@ impl ProxyClient {
         let mut parts = self.upstream_uri.clone().into_parts();
         parts.path_and_query = request.uri().path_and_query().cloned();
         let uri = Uri::from_parts(parts)?;
+
+        if let Some(headers) = &self.modified_headers {
+            for (key, value) in headers {
+                request.headers_mut().remove(key);
+                request.headers_mut().append(key.clone(), value.clone());
+            }
+        }
 
         info!("Forwarding {} to {}", request.uri(), uri);
         *request.uri_mut() = uri;

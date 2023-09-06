@@ -1,0 +1,15 @@
+{
+  "base_url": "http://localhost:3000/",
+  "users_db": "sqlite://users.db",
+  "upstreams": [
+    {
+      "name": "dotnet",
+      "origin_url": "http://dotnet.local:3000",
+      "upstream_url": "http://127.0.0.1:5243",
+      "claims": [],
+      "require_authentication": true,
+      "require_claims": [],
+      "headers": {}
+    }
+  ]
+}
