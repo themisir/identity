@@ -23,6 +23,8 @@ EOF
 
 FROM debian:bullseye-slim AS final
 
+RUN apt update && apt install -y ca-certificates
+
 WORKDIR /app
 
 ARG UID=10001
