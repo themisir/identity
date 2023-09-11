@@ -87,8 +87,8 @@ impl Issuer {
                 },
                 algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
                     key_type: RSAKeyType::RSA,
-                    n: base64::engine::general_purpose::STANDARD.encode(rsa_keys.n().to_vec()),
-                    e: base64::engine::general_purpose::STANDARD.encode(rsa_keys.e().to_vec()),
+                    n: base64::engine::general_purpose::URL_SAFE.encode(rsa_keys.n().to_vec()),
+                    e: base64::engine::general_purpose::URL_SAFE.encode(rsa_keys.e().to_vec()),
                 }),
             }],
         };
