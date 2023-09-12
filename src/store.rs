@@ -197,6 +197,10 @@ impl UserStore {
         password: &str,
         role: UserRole,
     ) -> anyhow::Result<User> {
+        if password.is_empty() {
+            anyhow::bail!("password is too short")
+        }
+
         let password_hash = User::create_hash(password.as_bytes())
             .map_err(|err| anyhow::format_err!("failed to create hash: {}", err))?;
         let (username, normalized_username) = Self::normalize_username(username);
@@ -224,6 +228,27 @@ impl UserStore {
             password_hash: row.password_hash,
             role: UserRole::from_str(row.role_name.as_str()).unwrap_or(UserRole::User),
         })
+    }
+
+    pub async fn change_user_password(&self, user_id: i32, password: &str) -> anyhow::Result<()> {
+        if password.is_empty() {
+            anyhow::bail!("password is too short")
+        }
+
+        let password_hash = User::create_hash(password.as_bytes())
+            .map_err(|err| anyhow::format_err!("failed to create hash: {}", err))?;
+
+        let row = sqlx::query(include_str!("sql/change_password.sql"))
+            .bind(password_hash)
+            .bind(user_id)
+            .execute(self.get_pool())
+            .await?;
+
+        match row.rows_affected() {
+            1 => Ok(()),
+            0 => anyhow::bail!("password has not changed"),
+            _ => anyhow::bail!("we fucked up"),
+        }
     }
 
     pub async fn find_user_by_session(

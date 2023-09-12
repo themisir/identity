@@ -1,9 +1,11 @@
 use crate::app::AppState;
-use crate::auth::{Authorize, CORE_ISSUER};
+use crate::auth::{Authorize, RedirectParams, TokenParams, CORE_ISSUER};
 use crate::http::AppError;
 use crate::store::{User, UserClaim, UserRole};
 
+use crate::uri::UriBuilder;
 use askama::Template;
+use axum::extract::OriginalUri;
 use axum::{
     extract::{Form, Path, State},
     http::{Request, StatusCode},
@@ -25,11 +27,15 @@ pub fn create_router(state: AppState) -> Router<AppState> {
         .route("/users/:user_id/update", post(update_user_handler))
         .route("/users/:user_id/claims", get(get_user_claims_page))
         .route(
+            "/users/:user_id/create-pw-session",
+            get(create_user_pw_session_handler),
+        )
+        .route(
             "/users/:user_id/claims/delete",
             post(delete_user_claim_handler),
         )
         .route("/users/:user_id/claims/add", post(add_user_claim_handler))
-        .layer(middleware::from_fn_with_state(state, authorize))
+        .layer(middleware::from_fn_with_state(state, authorize_admin))
 }
 
 pub fn create_setup_router(state: AppState) -> Router<AppState> {
@@ -37,6 +43,13 @@ pub fn create_setup_router(state: AppState) -> Router<AppState> {
         .route("/", get(add_first_user_page))
         .route("/", post(add_first_user_handler))
         .layer(middleware::from_fn_with_state(state, authorize_setup))
+}
+
+pub fn create_password_change_router(state: AppState) -> Router<AppState> {
+    Router::new()
+        .route("/", get(change_password_page))
+        .route("/", post(change_password_handler))
+        .layer(middleware::from_fn_with_state(state, authorize_user))
 }
 
 async fn authorize_setup(
@@ -51,21 +64,97 @@ async fn authorize_setup(
     })
 }
 
-async fn authorize(
+async fn authorize_admin(
+    auth: Authorize,
+    OriginalUri(uri): OriginalUri,
+    request: Request<Body>,
+    next: Next<Body>,
+) -> Result<Response, AppError> {
+    if let Some(User { role, .. }) = auth.user() {
+        if *role == UserRole::Admin {
+            return Ok(next.run(request).await);
+        }
+    }
+
+    let redirect_to = UriBuilder::new()
+        .set_path("/login")
+        .append_params(RedirectParams {
+            redirect_to: Some(uri.to_string()),
+        })
+        .to_string();
+
+    Ok(Redirect::to(redirect_to.as_str()).into_response())
+}
+
+async fn authorize_user(
     auth: Authorize,
     request: Request<Body>,
     next: Next<Body>,
 ) -> Result<Response, AppError> {
     Ok(match auth.user() {
         None => StatusCode::UNAUTHORIZED.into_response(),
-        Some(user) => {
-            if user.role == UserRole::Admin {
-                next.run(request).await
-            } else {
-                StatusCode::FORBIDDEN.into_response()
-            }
-        }
+        Some(_) => next.run(request).await,
     })
+}
+
+#[axum_macros::debug_handler]
+async fn create_user_pw_session_handler(
+    State(state): State<AppState>,
+    Path(user_id): Path<i32>,
+) -> Result<Redirect, AppError> {
+    let token = state
+        .store()
+        .create_user_session(user_id, CORE_ISSUER, Some(Duration::minutes(30)))
+        .await?;
+
+    let url = UriBuilder::new()
+        .set_path("/change-password")
+        .append_params(TokenParams { token })
+        .to_string();
+
+    Ok(Redirect::to(url.as_str()))
+}
+
+#[derive(Template)]
+#[template(path = "password.html")]
+struct ChangePasswordTemplate<'a> {
+    username: &'a str,
+}
+
+async fn change_password_page(authorize: Authorize) -> Result<impl IntoResponse, AppError> {
+    let user = authorize
+        .user()
+        .ok_or(anyhow::format_err!("unauthorized"))?;
+
+    let body = ChangePasswordTemplate {
+        username: user.username.as_str(),
+    }
+    .render()?;
+
+    Ok(Html(body))
+}
+
+#[derive(Deserialize)]
+struct ChangePasswordDto {
+    password: String,
+}
+
+#[axum_macros::debug_handler]
+async fn change_password_handler(
+    State(state): State<AppState>,
+    authorize: Authorize,
+    Form(form): Form<ChangePasswordDto>,
+) -> Result<impl IntoResponse, AppError> {
+    let user = authorize
+        .user()
+        .ok_or(anyhow::format_err!("unauthorized"))?;
+
+    state
+        .store()
+        .change_user_password(user.id, form.password.as_str())
+        .await?;
+
+    Ok(Html("Password updated!"))
 }
 
 #[derive(Template)]

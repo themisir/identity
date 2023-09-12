@@ -30,7 +30,7 @@ pub struct LoginRequestBody {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct RedirectParams {
-    redirect_to: Option<String>,
+    pub redirect_to: Option<String>,
 }
 
 #[axum_macros::debug_handler]

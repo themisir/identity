@@ -102,7 +102,7 @@ async fn start_server(state: AppState, args: &ListenArgs) -> anyhow::Result<()> 
         .route("/", get(index_handler))
         .route("/login", get(auth::show_login))
         .route("/login", post(auth::handle_login))
-        .route("/logout", post(auth::logout))
+        .route("/logout", get(auth::logout))
         .route("/authorize", get(auth::authorize))
         .route("/unauthorized", get(auth::show_unauthorized))
         .route(
@@ -112,6 +112,10 @@ async fn start_server(state: AppState, args: &ListenArgs) -> anyhow::Result<()> 
         .route("/.well-known/jwks", get(issuer::jwk_handler))
         .nest("/admin", admin::create_router(state.clone()))
         .nest("/setup", admin::create_setup_router(state.clone()))
+        .nest(
+            "/change-password",
+            admin::create_password_change_router(state.clone()),
+        )
         .layer(middleware::from_fn_with_state(
             state.clone(),
             proxy::middleware,

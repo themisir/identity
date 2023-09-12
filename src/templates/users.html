@@ -22,6 +22,7 @@
         <td>{{ user.role|e }}</td>
         <td class="actions">
             <a href="/admin/users/{{ user.id|e }}/claims">Claims</a>
+            <a href="/admin/users/{{ user.id|e }}/create-pw-session">Password</a>
             {% if user.role == crate::store::UserRole::Admin %}
             <a data-submit="/admin/users/{{ user.id|e }}/update"
                data-submit-confirm="Are you sure?"
