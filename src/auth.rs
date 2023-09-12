@@ -1,19 +1,15 @@
 use crate::app::AppState;
-use crate::http::{Cookies, SetCookie};
+use crate::http::{get_header, AppError, Cookies, Either, SetCookie};
 use crate::proxy::{UpstreamAuthorizeParams, PROXY_AUTHORIZE_ENDPOINT, PROXY_TOKEN_TTL};
-use crate::store::{User, UserStore};
+use crate::store::User;
 use crate::uri::UriBuilder;
 
-use std::convert::Infallible;
+use std::borrow::Cow;
 
 use axum::{
     async_trait,
     extract::{FromRequestParts, Query, State},
-    http::{
-        header::{AsHeaderName, AUTHORIZATION},
-        request::Parts,
-        HeaderMap, StatusCode,
-    },
+    http::{header::AUTHORIZATION, request::Parts, StatusCode},
     response::{Html, IntoResponse, Redirect},
     Form,
 };
@@ -59,12 +55,7 @@ pub async fn authorize(
     Query(params): Query<AuthorizeParams>,
     auth: Authorize,
 ) -> Result<Redirect, StatusCode> {
-    let user = auth.find_user(state.store()).await.unwrap_or_else(|err| {
-        error!("failed to find user: {}", err);
-        None
-    });
-
-    match user {
+    match auth.user() {
         None => {
             let authorize_uri = UriBuilder::new()
                 .append_path("/authorize")
@@ -130,9 +121,17 @@ pub async fn authorize(
     }
 }
 
-#[axum_macros::debug_handler]
-pub async fn show_login() -> impl IntoResponse {
-    Html(include_str!("templates/login.html"))
+pub async fn show_login(
+    Query(params): Query<RedirectParams>,
+    auth: Authorize,
+) -> Result<Either<Html<&'static str>, Redirect>, AppError> {
+    if auth.user().is_some() {
+        let redirect_to = params.redirect_to.unwrap_or("/".to_string());
+
+        Ok(Either::Second(Redirect::to(redirect_to.as_str())))
+    } else {
+        Ok(Either::First(Html(include_str!("templates/login.html"))))
+    }
 }
 
 #[axum_macros::debug_handler]
@@ -179,7 +178,7 @@ pub async fn handle_login(
             let redirect_to = params.redirect_to.unwrap_or("/".to_string());
 
             return Ok((
-                Authorize::new(session_token).set_cookie(Some(Duration::days(30))),
+                Authorize::set_cookie(session_token, Some(Duration::days(30))),
                 Redirect::to(redirect_to.as_str()),
             ));
         }
@@ -199,25 +198,30 @@ pub async fn handle_login(
     ))
 }
 
-#[derive(Default, Clone)]
 pub struct Authorize {
-    pub session_token: Option<String>,
+    user: Option<User>,
 }
 
 impl Authorize {
-    pub fn new(session_token: String) -> Self {
-        Self {
-            session_token: Some(session_token),
-        }
+    pub(crate) async fn from_token(token: &str, state: &AppState) -> anyhow::Result<Self> {
+        let user = state
+            .store()
+            .find_user_by_session(token, Some(CORE_ISSUER))
+            .await?;
+
+        Ok(Self { user })
     }
 
-    pub fn set_cookie<'c>(self, ttl: Option<Duration>) -> SetCookie<'c> {
+    pub fn user(&self) -> Option<&User> {
+        self.user.as_ref()
+    }
+
+    pub fn set_cookie<'c, V>(token: V, ttl: Option<Duration>) -> SetCookie<'c>
+    where
+        V: Into<Cow<'c, str>>,
+    {
         let ttl = ttl.unwrap_or(Duration::days(30));
-        let cookie_value = match self.session_token {
-            None => String::default(),
-            Some(s) => s,
-        };
-        let cookie = Cookie::build(COOKIE_NAME, cookie_value)
+        let cookie = Cookie::build(COOKIE_NAME, token)
             .max_age(cookie::time::Duration::new(ttl.num_seconds(), 0))
             .path("/")
             .http_only(true)
@@ -228,51 +232,40 @@ impl Authorize {
     }
 
     pub fn clear_cookie<'c>() -> SetCookie<'c> {
-        Authorize::default().set_cookie(Some(Duration::seconds(1))) // short ttl, removes cookie
+        Self::set_cookie("", Some(Duration::seconds(1))) // short ttl, removes cookie
     }
+}
 
-    pub async fn find_user(&self, store: &UserStore) -> anyhow::Result<Option<User>> {
-        if let Some(token) = &self.session_token {
-            store
-                .find_user_by_session(token.as_str(), Some(CORE_ISSUER))
-                .await
-        } else {
-            Ok(None)
-        }
-    }
+#[derive(Serialize, Deserialize)]
+pub struct TokenParams {
+    pub token: String,
 }
 
 #[async_trait]
 impl FromRequestParts<AppState> for Authorize {
-    type Rejection = Infallible;
+    type Rejection = AppError;
 
     async fn from_request_parts(
         parts: &mut Parts,
-        _state: &AppState,
+        state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let params = Cookies::from_headers(&parts.headers)
-            .get(COOKIE_NAME)
-            .map(|cookie| Authorize::new(cookie.value().into()))
-            .or_else(|| {
-                get_header(&parts.headers, AUTHORIZATION).and_then(|auth_header| {
-                    if auth_header.len() > 7 && auth_header.starts_with("Bearer ") {
-                        Some(Authorize::new(auth_header[7..].into()))
-                    } else {
-                        None
-                    }
-                })
-            })
-            .unwrap_or(Self {
-                session_token: None,
-            });
+        // extract from header
+        if let Some(auth_header) = get_header(&parts.headers, AUTHORIZATION) {
+            if auth_header.len() > 7 && auth_header.starts_with("Bearer ") {
+                return Ok(Self::from_token(&auth_header[7..], state).await?);
+            }
+        }
 
-        Ok(params)
+        // extract from query
+        if let Ok(Query(TokenParams { token })) = Query::try_from_uri(&parts.uri) {
+            return Ok(Self::from_token(token.as_ref(), state).await?);
+        };
+
+        // extract from cookie
+        if let Some(cookie) = Cookies::extract_one(&parts.headers, COOKIE_NAME) {
+            return Ok(Self::from_token(cookie.value(), state).await?);
+        }
+
+        Ok(Self { user: None })
     }
-}
-
-fn get_header<K>(headers: &HeaderMap, key: K) -> Option<&str>
-where
-    K: AsHeaderName,
-{
-    headers.get(key).and_then(|header| header.to_str().ok())
 }

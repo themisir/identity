@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::borrow::Cow;
 use std::convert::Infallible;
 
@@ -5,7 +6,7 @@ use axum::{
     async_trait,
     extract::FromRequestParts,
     http::{
-        header::{COOKIE, SET_COOKIE},
+        header::{AsHeaderName, COOKIE, SET_COOKIE},
         request, HeaderMap, HeaderValue, StatusCode,
     },
     response::{IntoResponse, IntoResponseParts, Response, ResponseParts},
@@ -112,4 +113,29 @@ where
     fn from(err: E) -> Self {
         Self(err.into())
     }
+}
+
+pub enum Either<A, B> {
+    First(A),
+    Second(B),
+}
+
+impl<A, B> IntoResponse for Either<A, B>
+where
+    A: IntoResponse,
+    B: IntoResponse,
+{
+    fn into_response(self) -> Response {
+        match self {
+            Either::First(a) => a.into_response(),
+            Either::Second(b) => b.into_response(),
+        }
+    }
+}
+
+pub fn get_header<K>(headers: &HeaderMap, key: K) -> Option<&str>
+where
+    K: AsHeaderName,
+{
+    headers.get(key).and_then(|header| header.to_str().ok())
 }

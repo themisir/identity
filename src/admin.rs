@@ -52,12 +52,11 @@ async fn authorize_setup(
 }
 
 async fn authorize(
-    State(state): State<AppState>,
     auth: Authorize,
     request: Request<Body>,
     next: Next<Body>,
 ) -> Result<Response, AppError> {
-    Ok(match auth.find_user(state.store()).await? {
+    Ok(match auth.user() {
         None => StatusCode::UNAUTHORIZED.into_response(),
         Some(user) => {
             if user.role == UserRole::Admin {
@@ -145,7 +144,7 @@ async fn add_first_user_handler(
         .await?;
 
     Ok((
-        Authorize::new(session_token).set_cookie(ttl),
+        Authorize::set_cookie(session_token, ttl),
         Redirect::to("/admin/users"),
     ))
 }
