@@ -21,17 +21,23 @@ use url::Url;
 
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
-    iss: String,
-    aud: String,
-    sub: String,
-    iat: i64,
-    exp: i64,
-    nbf: i64,
+    pub iss: String,
+    pub aud: String,
+    pub sub: String,
+    pub iat: i64,
+    pub exp: i64,
+    pub nbf: i64,
 
     // extras
-    name: String,
+    pub name: String,
     #[serde(flatten)]
-    extra: HashMap<String, String>,
+    pub extra: HashMap<String, String>,
+}
+
+impl Claims {
+    pub fn valid_for(&self) -> Duration {
+        Duration::seconds(self.exp - chrono::Utc::now().timestamp())
+    }
 }
 
 pub struct Issuer {

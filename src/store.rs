@@ -144,6 +144,28 @@ impl UserStore {
         Ok(row.is_some())
     }
 
+    pub async fn find_user_by_id(&self, id: i32) -> anyhow::Result<Option<User>> {
+        #[derive(sqlx::FromRow)]
+        struct Row {
+            id: i32,
+            username: String,
+            password_hash: String,
+            role_name: String,
+        }
+
+        let row = sqlx::query_as::<_, Row>(include_str!("sql/find_user_by_id.sql"))
+            .bind(id)
+            .fetch_optional(self.get_pool())
+            .await?;
+
+        Ok(row.map(|row| User {
+            id: row.id,
+            username: row.username,
+            password_hash: row.password_hash,
+            role: UserRole::from_str(row.role_name.as_str()).unwrap_or(UserRole::User),
+        }))
+    }
+
     pub async fn find_user_by_username(&self, username: &str) -> anyhow::Result<Option<User>> {
         let (_, normalized_username) = Self::normalize_username(username);
 

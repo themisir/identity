@@ -1,6 +1,8 @@
 use crate::app::AppState;
 use crate::http::{get_header, AppError, Cookies, Either, SetCookie};
-use crate::proxy::{UpstreamAuthorizeParams, PROXY_AUTHORIZE_ENDPOINT, PROXY_TOKEN_TTL};
+use crate::proxy::{
+    ProxyClient, UpstreamAuthorizeParams, PROXY_AUTHORIZE_ENDPOINT, PROXY_TOKEN_TTL,
+};
 use crate::store::User;
 use crate::uri::UriBuilder;
 
@@ -49,6 +51,34 @@ pub struct AuthorizeParams {
     pub redirect_to: String,
 }
 
+pub async fn issue_upstream_token(
+    state: &AppState,
+    upstream: &ProxyClient,
+    user: &User,
+) -> anyhow::Result<Option<String>> {
+    let claims = state
+        .store()
+        .get_user_claims(user.id)
+        .await
+        .map_err(|err| anyhow::format_err!("failed to get user {} claims: {}", user.id, err))?;
+
+    if let Some(claims) = upstream.filter_claims(claims) {
+        let token = state
+            .issuer()
+            .create_token(
+                upstream.name(),
+                &user,
+                claims.as_ref(),
+                (*PROXY_TOKEN_TTL).into(),
+            )
+            .map_err(|err| anyhow::format_err!("failed to create token: {}", err))?;
+
+        Ok(Some(token))
+    } else {
+        Ok(None)
+    }
+}
+
 #[axum_macros::debug_handler]
 pub async fn authorize(
     State(state): State<AppState>,
@@ -74,29 +104,14 @@ pub async fn authorize(
         Some(user) => match state.upstreams().find_by_name(params.client_id.as_str()) {
             None => Err(StatusCode::BAD_REQUEST),
             Some(upstream) => {
-                let claims = state
-                    .store()
-                    .get_user_claims(user.id)
+                let token = issue_upstream_token(&state, upstream, &user)
                     .await
                     .map_err(|err| {
                         error!("failed to get user {} claims: {}", user.id, err);
                         StatusCode::INTERNAL_SERVER_ERROR
                     })?;
 
-                if let Some(claims) = upstream.filter_claims(claims) {
-                    let token = state
-                        .issuer()
-                        .create_token(
-                            upstream.name(),
-                            &user,
-                            claims.as_ref(),
-                            (*PROXY_TOKEN_TTL).into(),
-                        )
-                        .map_err(|err| {
-                            error!("failed to create token: {}", err);
-                            StatusCode::INTERNAL_SERVER_ERROR
-                        })?;
-
+                if let Some(token) = token {
                     let upstream_authorize_uri = UriBuilder::new()
                         .set_origin(upstream.origin())
                         .set_path(PROXY_AUTHORIZE_ENDPOINT)
