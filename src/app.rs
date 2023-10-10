@@ -1,11 +1,17 @@
 use crate::issuer::Issuer;
 use crate::proxy::ProxyClient;
 use crate::store::UserStore;
+use crate::utils::Duration;
 
-use std::{collections::HashMap, path::Path, str::FromStr, sync::Arc};
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+    str::FromStr,
+    sync::Arc,
+};
 
-use serde::{Deserialize, Serialize};
+use log::info;
+use serde::Deserialize;
 use sqlx::sqlite::SqlitePoolOptions;
 use url::Url;
 
@@ -59,7 +65,7 @@ impl AppState {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct AppConfig {
     pub base_url: Url,
     pub users_db: Url,
@@ -78,7 +84,7 @@ impl AppConfig {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct UpstreamConfig {
     pub name: String,
     pub claims: Vec<String>,
@@ -91,6 +97,8 @@ pub struct UpstreamConfig {
     // authorization rules
     pub require_claims: Option<Vec<String>>,
     pub require_authentication: bool,
+
+    pub cookie_ttl: Option<Duration>,
 
     pub headers: Option<HashMap<String, String>>,
 }
@@ -121,6 +129,11 @@ impl Upstreams {
                     host
                 );
             }
+
+            info!(
+                "Added upstream '{}' ({} -> {}): {:?}",
+                cfg.name, cfg.origin_url, cfg.upstream_url, cfg
+            );
         }
 
         Ok(Self { by_name, by_host })

@@ -1,8 +1,10 @@
 use crate::app::{AppState, UpstreamConfig};
-use crate::auth::{AuthorizeParams, issue_upstream_token};
+use crate::auth::{issue_upstream_token, AuthorizeParams};
 use crate::http::{Cookies, SetCookie};
+use crate::issuer::Claims;
 use crate::store::UserClaim;
 use crate::uri::UriBuilder;
+use crate::utils;
 
 use std::{
     borrow::Cow,
@@ -11,7 +13,6 @@ use std::{
     str::FromStr,
 };
 
-use crate::utils;
 use axum::{
     extract::{FromRequest, FromRequestParts, Host, OriginalUri, Query, State},
     http::{
@@ -28,7 +29,6 @@ use hyper_tls::HttpsConnector;
 use log::{error, info, warn};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use crate::issuer::Claims;
 
 pub async fn middleware(
     State(state): State<AppState>,
@@ -66,6 +66,7 @@ pub struct ProxyClient {
     origin: String,
     claims: HashSet<String>,
     modified_headers: Option<Vec<(HeaderName, HeaderValue)>>,
+    token_ttl: Duration,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -129,6 +130,8 @@ impl ProxyClient {
             }
         };
 
+        let token_ttl = cfg.cookie_ttl.map_or(*PROXY_TOKEN_TTL, |v| v.into());
+
         Ok(Self {
             config: cfg.clone(),
             client,
@@ -136,6 +139,7 @@ impl ProxyClient {
             origin,
             claims,
             modified_headers,
+            token_ttl,
         })
     }
 
@@ -173,11 +177,23 @@ impl ProxyClient {
         }
     }
 
-    async fn refresh_token_if_needed(&self, state: &AppState, claims: &Claims) -> anyhow::Result<Option<String>> {
+    pub fn token_ttl(&self) -> Duration {
+        self.token_ttl
+    }
+
+    async fn refresh_token_if_needed(
+        &self,
+        state: &AppState,
+        claims: &Claims,
+    ) -> anyhow::Result<Option<String>> {
         let refresh_needed = claims.valid_for() < *PROXY_TOKEN_REFRESH_THRESHOLD;
         if refresh_needed {
             let user_id = i32::from_str(claims.sub.as_str())?;
-            let user = state.store().find_user_by_id(user_id).await?.ok_or(anyhow::format_err!("user by id {} not found", claims.sub))?;
+            let user = state
+                .store()
+                .find_user_by_id(user_id)
+                .await?
+                .ok_or(anyhow::format_err!("user by id {} not found", claims.sub))?;
 
             issue_upstream_token(state, self, &user).await
         } else {
@@ -209,13 +225,14 @@ impl ProxyClient {
                     let value: HeaderValue = format!("Bearer {}", cookie.value()).try_into()?;
                     request.headers_mut().append(AUTHORIZATION, value);
 
-
-                    return if let Ok(Some(token)) = self.refresh_token_if_needed(state, &claims).await {
-                        let response= self.forward(request).await?;
-                        Ok((Self::set_cookie(token), response).into_response())
+                    return if let Ok(Some(token)) =
+                        self.refresh_token_if_needed(state, &claims).await
+                    {
+                        let response = self.forward(request).await?;
+                        Ok((self.set_cookie(token), response).into_response())
                     } else {
                         self.forward(request).await
-                    }
+                    };
                 }
             }
         }
@@ -227,15 +244,17 @@ impl ProxyClient {
         }
     }
 
-    fn set_cookie<'c, T>(token: T) -> SetCookie<'c>
+    fn set_cookie<'c, T>(&self, token: T) -> SetCookie<'c>
     where
         T: Into<Cow<'c, str>>,
     {
-        SetCookie(Cookie::build(PROXY_COOKIE_NAME, token)
-            .path("/")
-            .http_only(true)
-            .max_age(utils::Duration::from(*PROXY_TOKEN_TTL).into())
-            .finish())
+        SetCookie(
+            Cookie::build(PROXY_COOKIE_NAME, token)
+                .path("/")
+                .http_only(true)
+                .max_age(utils::Duration::from(self.token_ttl).into())
+                .finish(),
+        )
     }
 
     async fn authorize(
@@ -246,7 +265,7 @@ impl ProxyClient {
         let query = Query::<UpstreamAuthorizeParams>::from_request(request, state).await?;
 
         Ok((
-            Self::set_cookie(query.token.clone()),
+            self.set_cookie(query.token.clone()),
             Redirect::to(query.redirect_to.as_str()),
         ))
     }

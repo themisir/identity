@@ -123,7 +123,7 @@ async fn start_server(state: AppState, args: &ListenArgs) -> anyhow::Result<()> 
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
-    println!("Binding on {}", args.bind);
+    info!("Binding on {}", args.bind);
 
     axum::Server::bind(&args.bind)
         .serve(router.into_make_service())

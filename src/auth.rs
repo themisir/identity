@@ -1,7 +1,7 @@
 use crate::app::AppState;
 use crate::http::{get_header, AppError, Cookies, Either, SetCookie};
 use crate::proxy::{
-    ProxyClient, UpstreamAuthorizeParams, PROXY_AUTHORIZE_ENDPOINT, PROXY_TOKEN_TTL,
+    ProxyClient, UpstreamAuthorizeParams, PROXY_AUTHORIZE_ENDPOINT,
 };
 use crate::store::User;
 use crate::uri::UriBuilder;
@@ -65,12 +65,7 @@ pub async fn issue_upstream_token(
     if let Some(claims) = upstream.filter_claims(claims) {
         let token = state
             .issuer()
-            .create_token(
-                upstream.name(),
-                &user,
-                claims.as_ref(),
-                (*PROXY_TOKEN_TTL).into(),
-            )
+            .create_token(upstream.name(), &user, claims.as_ref(), upstream.token_ttl())
             .map_err(|err| anyhow::format_err!("failed to create token: {}", err))?;
 
         Ok(Some(token))
