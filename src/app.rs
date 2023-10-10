@@ -3,6 +3,7 @@ use crate::proxy::ProxyClient;
 use crate::store::UserStore;
 
 use std::{collections::HashMap, path::Path, str::FromStr, sync::Arc};
+use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqlitePoolOptions;
@@ -84,6 +85,8 @@ pub struct UpstreamConfig {
 
     pub upstream_url: Url,
     pub origin_url: Url,
+
+    pub ignored_paths: Option<HashSet<String>>,
 
     // authorization rules
     pub require_claims: Option<Vec<String>>,

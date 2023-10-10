@@ -194,6 +194,12 @@ impl ProxyClient {
             return Ok(self.authorize(request, state).await?.into_response());
         }
 
+        if let Some(ignored_paths) = &self.config.ignored_paths {
+            if ignored_paths.contains(request.uri().path()) {
+                return self.forward(request).await;
+            }
+        }
+
         if let Some(cookie) = Cookies::extract_one(request.headers(), PROXY_COOKIE_NAME) {
             match state.issuer().validate_token(cookie.value()) {
                 Err(err) => {
