@@ -231,12 +231,12 @@ impl Authorize {
         V: Into<Cow<'c, str>>,
     {
         let ttl = ttl.unwrap_or(Duration::days(30));
-        let cookie = Cookie::build(COOKIE_NAME, token)
+        let cookie = Cookie::build(Cookie::new(COOKIE_NAME, token))
             .max_age(cookie::time::Duration::new(ttl.num_seconds(), 0))
             .path("/")
             .http_only(true)
             .same_site(SameSite::Strict)
-            .finish();
+            .build();
 
         SetCookie(cookie)
     }

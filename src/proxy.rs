@@ -249,11 +249,11 @@ impl ProxyClient {
         T: Into<Cow<'c, str>>,
     {
         SetCookie(
-            Cookie::build(PROXY_COOKIE_NAME, token)
+            Cookie::build(Cookie::new(PROXY_COOKIE_NAME, token))
                 .path("/")
                 .http_only(true)
                 .max_age(utils::Duration::from(self.token_ttl).into())
-                .finish(),
+                .build(),
         )
     }
 

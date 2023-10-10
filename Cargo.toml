@@ -1,6 +1,6 @@
 [package]
 name = "identity"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
 
 [dependencies]
@@ -8,7 +8,7 @@ tokio = { version = "1", features = ["full"] }
 
 axum = { version = "0.6" }
 axum-macros = "0.3.8"
-cookie = { version = "0.17", features = ["percent-encoding", "percent-encode"] }
+cookie = { version = "0.18", features = ["percent-encoding", "percent-encode"] }
 tower-http = { version = "0.4.3", features = ["trace"] }
 tracing-subscriber = { version = "0.3.17", features = ["env-filter", "tracing-log"] }
 askama = "0.12"
@@ -40,7 +40,7 @@ sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite", "chrono"] }
 refinery = { version = "0.8", features = ["rusqlite"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-url = { version = "2.4.0", features = ["serde"] }
+url = { version = "2.4", features = ["serde"] }
 
 log = "0.4"
 env_logger = "0.10"
