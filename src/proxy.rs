@@ -27,7 +27,6 @@ use cookie::Cookie;
 use hyper::{client::HttpConnector, Body};
 use hyper_tls::HttpsConnector;
 use log::{error, info, warn};
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
 pub async fn middleware(
@@ -56,8 +55,8 @@ pub async fn middleware(
 
 pub const PROXY_COOKIE_NAME: &str = "_identity.im";
 pub const PROXY_AUTHORIZE_ENDPOINT: &str = "/.identity/authorize";
-pub static PROXY_TOKEN_TTL: Lazy<Duration> = Lazy::new(|| Duration::hours(1));
-pub static PROXY_TOKEN_REFRESH_THRESHOLD: Lazy<Duration> = Lazy::new(|| Duration::minutes(15));
+pub const PROXY_TOKEN_TTL: Duration = Duration::hours(1);
+pub const PROXY_TOKEN_REFRESH_THRESHOLD: Duration = Duration::minutes(15);
 
 pub struct ProxyClient {
     config: UpstreamConfig,
@@ -130,7 +129,7 @@ impl ProxyClient {
             }
         };
 
-        let token_ttl = cfg.cookie_ttl.map_or(*PROXY_TOKEN_TTL, |v| v.into());
+        let token_ttl = cfg.cookie_ttl.map_or(PROXY_TOKEN_TTL, |v| v.into());
 
         Ok(Self {
             config: cfg.clone(),
@@ -186,7 +185,7 @@ impl ProxyClient {
         state: &AppState,
         claims: &Claims,
     ) -> anyhow::Result<Option<String>> {
-        let refresh_needed = claims.valid_for() < *PROXY_TOKEN_REFRESH_THRESHOLD;
+        let refresh_needed = claims.valid_for() < PROXY_TOKEN_REFRESH_THRESHOLD;
         if refresh_needed {
             let user_id = i32::from_str(claims.sub.as_str())?;
             let user = state
