@@ -10,10 +10,7 @@ use axum::{
 };
 use base64::Engine;
 use chrono::Duration;
-use jsonwebtoken::jwk::{
-    AlgorithmParameters, CommonParameters, Jwk, JwkSet, KeyOperations, PublicKeyUse,
-    RSAKeyParameters, RSAKeyType,
-};
+use jsonwebtoken::jwk::{AlgorithmParameters, CommonParameters, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse, RSAKeyParameters, RSAKeyType};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Validation};
 use openssl::rsa::Rsa;
 use serde::{Deserialize, Serialize};
@@ -88,7 +85,7 @@ impl Issuer {
                     key_id: Some(kid.clone()),
                     public_key_use: Some(PublicKeyUse::Signature),
                     key_operations: Some(vec![KeyOperations::Verify, KeyOperations::Sign]),
-                    algorithm: Some(Algorithm::RS256),
+                    key_algorithm: Some(KeyAlgorithm::RS256),
                     ..Default::default()
                 },
                 algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
