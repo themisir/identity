@@ -1,6 +1,3 @@
-use crate::app::AppState;
-use crate::store::{User, UserClaim};
-
 use std::collections::HashMap;
 
 use axum::{
@@ -8,13 +5,14 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use base64::Engine;
-use chrono::Duration;
-use jsonwebtoken::jwk::{AlgorithmParameters, CommonParameters, Jwk, JwkSet, KeyAlgorithm, KeyOperations, PublicKeyUse, RSAKeyParameters, RSAKeyType};
-use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Validation};
-use openssl::rsa::Rsa;
+use chrono::{Duration, TimeDelta};
+use jsonwebtoken::{Algorithm, Validation};
 use serde::{Deserialize, Serialize};
 use url::Url;
+
+use crate::app::AppState;
+use crate::keystore::{Jwks, Keystore};
+use crate::store::{User, UserClaim};
 
 #[derive(Serialize, Deserialize)]
 pub struct Claims {
@@ -38,14 +36,10 @@ impl Claims {
 }
 
 pub struct Issuer {
-    header: jsonwebtoken::Header,
-    encoding_key: EncodingKey,
-    decoding_key: DecodingKey,
-    validation: Validation,
     issuer: String,
-
-    jwk_set: JwkSet,
     discovery: DiscoverySpecs,
+    keystore: Keystore,
+    validation: Validation,
 }
 
 #[derive(Serialize)]
@@ -60,42 +54,7 @@ struct DiscoverySpecs {
 type Result<T> = jsonwebtoken::errors::Result<T>;
 
 impl Issuer {
-    pub fn new(issuer: Url) -> Self {
-        let algorithm = Algorithm::RS256;
-        let mut header = jsonwebtoken::Header::new(algorithm);
-
-        let rsa_keys = Rsa::generate(2048).expect("Failed to generate RSA keys.");
-        let private_key_pem = rsa_keys
-            .private_key_to_pem()
-            .expect("Failed to extract private key to PEM.");
-        let public_key_pem = rsa_keys
-            .public_key_to_pem()
-            .expect("Failed to extract public key to PEM.");
-
-        let encoding_key = EncodingKey::from_rsa_pem(&private_key_pem).unwrap();
-        let decoding_key = DecodingKey::from_rsa_pem(&public_key_pem).unwrap();
-
-        let validation = Validation::new(algorithm);
-
-        let kid = format!("idk{}", chrono::Utc::now().timestamp());
-
-        let jwk_set = JwkSet {
-            keys: vec![Jwk {
-                common: CommonParameters {
-                    key_id: Some(kid.clone()),
-                    public_key_use: Some(PublicKeyUse::Signature),
-                    key_operations: Some(vec![KeyOperations::Verify, KeyOperations::Sign]),
-                    key_algorithm: Some(KeyAlgorithm::RS256),
-                    ..Default::default()
-                },
-                algorithm: AlgorithmParameters::RSA(RSAKeyParameters {
-                    key_type: RSAKeyType::RSA,
-                    n: base64::engine::general_purpose::URL_SAFE.encode(rsa_keys.n().to_vec()),
-                    e: base64::engine::general_purpose::URL_SAFE.encode(rsa_keys.e().to_vec()),
-                }),
-            }],
-        };
-
+    pub fn new(issuer: Url, keystore_dir: Option<String>) -> Self {
         let issuer = issuer.origin().ascii_serialization();
 
         let discovery = DiscoverySpecs {
@@ -106,23 +65,26 @@ impl Issuer {
             id_token_signing_alg_values_supported: vec![Algorithm::RS256],
         };
 
-        header.kid = Some(kid);
+        let mut keystore = Keystore::new(TimeDelta::days(30));
+        if let Some(keystore_dir) = keystore_dir {
+            keystore.use_directory(keystore_dir);
+        }
+
+        let mut validation = Validation::new(Algorithm::RS256);
+        validation.set_issuer(&[&issuer]);
+        validation.validate_exp = true;
+        validation.validate_nbf = true;
 
         Self {
-            header,
-            encoding_key,
-            decoding_key,
-            validation,
             issuer,
-
-            jwk_set,
+            keystore,
             discovery,
+            validation,
         }
     }
 
-    pub fn validate_token(&self, token: &str) -> Result<Claims> {
-        let data = jsonwebtoken::decode::<Claims>(token, &self.decoding_key, &self.validation)?;
-        Ok(data.claims)
+    pub fn validate_token(&self, token: &str) -> anyhow::Result<Claims> {
+        self.keystore.jwt_decode(token, &self.validation)
     }
 
     pub fn create_token(
@@ -151,13 +113,13 @@ impl Issuer {
             extra,
         };
 
-        jsonwebtoken::encode(&self.header, &claims, &self.encoding_key)
+        self.keystore.jwt_encode(claims)
     }
 }
 
 #[axum_macros::debug_handler]
 pub async fn jwk_handler(State(state): State<AppState>) -> Response {
-    Json(&state.issuer().jwk_set).into_response()
+    Jwks(&state.issuer().keystore).into_response()
 }
 
 #[axum_macros::debug_handler]

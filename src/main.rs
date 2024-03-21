@@ -26,6 +26,8 @@ mod store;
 mod uri;
 mod utils;
 
+mod keystore;
+
 /// Identity and user management proxy
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]

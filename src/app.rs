@@ -51,7 +51,7 @@ impl AppState {
         let store = UserStore::new(pool);
 
         // token issuer
-        let issuer = Issuer::new(config.base_url.clone());
+        let issuer = Issuer::new(config.base_url.clone(), config.keystore_dir.clone());
 
         // upstream clients
         let upstreams = Upstreams::from_config(&mut config.upstreams)?;
@@ -69,6 +69,7 @@ impl AppState {
 pub struct AppConfig {
     pub base_url: Url,
     pub users_db: Url,
+    pub keystore_dir: Option<String>,
     pub upstreams: Vec<UpstreamConfig>,
 }
 
