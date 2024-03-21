@@ -4,6 +4,7 @@
 /.vscode
 
 /data
+/keys
 *.db
 *.sqlite
 *.sqlite3

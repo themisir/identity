@@ -1,0 +1,43 @@
+# fly.toml app configuration file generated for themisir-identity on 2024-02-20T18:01:27+04:00
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'themisir-identity'
+primary_region = 'fra'
+
+[build]
+
+[http_service]
+internal_port = 3000
+force_https = true
+auto_stop_machines = true
+auto_start_machines = true
+min_machines_running = 0
+processes = ['app']
+
+[env]
+RUST_LOG = 'info'
+
+[[vm]]
+memory = '512mb'
+cpu_kind = 'shared'
+cpus = 1
+
+[[files]]
+guest_path = '/app/config.json'
+local_path = './config.json'
+
+[mounts]
+source = 'identity_user_data'
+destination = '/data/'
+
+[experimental]
+cmd = [
+  '/bin/server',
+  '--config-file',
+  '/app/config.json',
+  'listen',
+  '--bind',
+  '0.0.0.0:3000',
+]
